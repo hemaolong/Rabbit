@@ -44,7 +44,30 @@ func WndProc(hwnd HWND, msg uint32, wparam uintptr, lparam uintptr) uintptr {
 
 	case WM_COMMAND:
 	    if LOWORD(uint32(wparam)) == 1 {
-	        MessageBox(hwnd, _TEXT("hi"), _TEXT("kill U"), MB_OK)
+	        // MessageBox(hwnd, _TEXT("hi"), _TEXT("kill U"), MB_OK)
+	        nameBuf := new([]uint16)
+	        var dumb OPENFILENAME
+	        dumb.LStructSize = 200;
+	        dumb.HwndOwner = hwnd
+	        dumb.LpstrFile = (*uint16)(unsafe.Pointer(nameBuf))
+	        dumb.NMaxFile  = 100
+	        dumb.LpstrFilter = (*uint16)(_TEXT("All/0*.*/0Text/0*.TXT/0"))
+	        dumb.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST
+
+////////////////
+            libcomdlg32 := MustLoadLibrary("comdlg32.dll")
+
+            getOpenFileName := MustGetProcAddress(libcomdlg32, "GetOpenFileNameW")
+            ret, ret1, ret2 := syscall.Syscall(getOpenFileName, 1,
+            		uintptr(unsafe.Pointer(&dumb)),
+            		0,
+            		0)
+            println(ret);
+            println(ret1);
+            println(ret2)
+
+            ///////////////////////
+	        print(GetOpenFileName(&dumb))
 	    }
 	    return 0
 	case WM_DESTROY:
