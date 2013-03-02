@@ -1,20 +1,22 @@
 package main
 
 import (
-	// "fmt"
 	. "github.com/lxn/go-winapi"
 	"os"
 	"syscall"
 	"unsafe"
-	// "strconv"
 )
-
 
 const (
 	winWidth  int32 = 800
 	winHeight int32 = 600
 
-	OPEN_BTN_ID int32 = 1
+	OPEN_BTN_ID int32 = 1001
+)
+
+var (
+	winProc  HWND
+	replaced bool = false
 )
 
 func _TEXT(svt string) *uint16 {
@@ -36,79 +38,104 @@ func createButton(x, y, w, h int32, parent HWND, text string, id int32) (result 
 	return result
 }
 
+func LoadPath(hwnd HWND, msg uint32, wparam uintptr, lparam uintptr) uintptr {
+
+	if hwnd != 0 && !replaced {
+		println("replace the win proc")
+		parentHwnd := GetParent(hwnd)
+		if parentHwnd == hwnd {
+			replaced = true
+			winProc = HWND(SetWindowLong(parentHwnd, GWL_WNDPROC,
+				int32(syscall.NewCallback(WndProc))))
+		}
+	}
+
+	if msg == WM_NOTIFY {
+		println("notifyffffffffffff")
+	}
+
+	// println("fffffffffff");
+	// return DefWindowProc(winProc, msg, wparam, lparam)
+	return 0
+}
+
 func WndProc(hwnd HWND, msg uint32, wparam uintptr, lparam uintptr) uintptr {
+	openCb := syscall.NewCallback(LoadPath)
+
 	switch msg {
 	case WM_CREATE:
 		createButton(10, 10, 100, 40, hwnd, "Open", OPEN_BTN_ID)
 		return 0
 
 	case WM_COMMAND:
-	    if LOWORD(uint32(wparam)) == 1 {
-	        // MessageBox(hwnd, _TEXT("hi"), _TEXT("kill U"), MB_OK)
-	        nameBuf := new([]uint16)
-	        var dumb OPENFILENAME
-	        dumb.LStructSize = 200;
-	        dumb.HwndOwner = hwnd
-	        dumb.LpstrFile = (*uint16)(unsafe.Pointer(nameBuf))
-	        dumb.NMaxFile  = 100
-	        dumb.LpstrFilter = (*uint16)(_TEXT("All/0*.*/0Text/0*.TXT/0"))
-	        dumb.Flags = OFN_PATHMUSTEXIST | OFN_FILEMUSTEXIST
+		wid := LOWORD(uint32(wparam))
+		if wparam == IDOK {
+			println("OK       clicked")
+		}
+		if wid == uint16(OPEN_BTN_ID) {
+			// MessageBox(hwnd, _TEXT("hi"), _TEXT("kill U"), MB_OK)
+			var nameBuf [100]uint16
+			var dumb OPENFILENAME
+			dumb.LStructSize = uint32(unsafe.Sizeof(dumb))
+			dumb.HwndOwner = hwnd
+			dumb.LpstrFile = (*uint16)(unsafe.Pointer(&nameBuf))
+			dumb.NMaxFile = 100
+			dumb.NFilterIndex = 1
+			dumb.LpstrFilter = (*uint16)(_TEXT("All Files (*.png)"))
+			dumb.Flags = OFN_ENABLEHOOK | OFN_EXPLORER
 
-////////////////
-            libcomdlg32 := MustLoadLibrary("comdlg32.dll")
 
-            getOpenFileName := MustGetProcAddress(libcomdlg32, "GetOpenFileNameW")
-            ret, ret1, ret2 := syscall.Syscall(getOpenFileName, 1,
-            		uintptr(unsafe.Pointer(&dumb)),
-            		0,
-            		0)
-            println(ret);
-            println(ret1);
-            println(ret2)
+			// Trigger the open
+			dumb.LpfnHook = LPOFNHOOKPROC(openCb)
 
-            ///////////////////////
-	        print(GetOpenFileName(&dumb))
-	    }
-	    return 0
+			GetOpenFileName(&dumb)
+		}
+		return 0
 	case WM_DESTROY:
 		os.Exit(0)
 	}
-	return DefWindowProc(hwnd, msg, wparam, lparam)
+
+	if winProc == 0 {
+		println(=========================");
+		winProc = hwnd
+	}
+
+	return DefWindowProc(winProc, msg, wparam, lparam)
 }
 
-  //Register WndClass
- func RegisterClass(){
-     var wndProcPtr uintptr = syscall.NewCallback(WndProc)
-     hInst := GetModuleHandle(nil)
-     if hInst == 0 {
-         panic("GetModuleHandle")
-     }
-     hIcon := LoadIcon(0, (*uint16)(unsafe.Pointer(uintptr(IDI_APPLICATION))))
-     if hIcon == 0 {
-         panic("LoadIcon")
-     }
-     hCursor := LoadCursor(0, (*uint16)(unsafe.Pointer(uintptr(IDC_ARROW))))
-     if hCursor == 0 {
-         panic("LoadCursor")
-     }
-     var wc WNDCLASSEX
-     wc.CbSize = uint32(unsafe.Sizeof(wc))
-     wc.LpfnWndProc = wndProcPtr
-     wc.HInstance = hInst
-     wc.HIcon = hIcon
-     wc.HCursor = hCursor
-     wc.HbrBackground = COLOR_BTNFACE + 1
-     wc.LpszClassName = syscall.StringToUTF16Ptr("test")
-     if atom := RegisterClassEx(&wc); atom == 0 {
-         panic("RegisterClassEx")
-     }
- }
+//Register WndClass
+func RegisterClass() {
+	var wndProcPtr uintptr = syscall.NewCallback(WndProc)
+	hInst := GetModuleHandle(nil)
+	if hInst == 0 {
+		panic("GetModuleHandle")
+	}
+	hIcon := LoadIcon(0, (*uint16)(unsafe.Pointer(uintptr(IDI_APPLICATION))))
+	if hIcon == 0 {
+		panic("LoadIcon")
+	}
+	hCursor := LoadCursor(0, (*uint16)(unsafe.Pointer(uintptr(IDC_ARROW))))
+	if hCursor == 0 {
+		panic("LoadCursor")
+	}
+	var wc WNDCLASSEX
+	wc.CbSize = uint32(unsafe.Sizeof(wc))
+	wc.LpfnWndProc = wndProcPtr
+	wc.HInstance = hInst
+	wc.HIcon = hIcon
+	wc.HCursor = hCursor
+	wc.HbrBackground = COLOR_BTNFACE + 1
+	wc.LpszClassName = syscall.StringToUTF16Ptr("test")
+	if atom := RegisterClassEx(&wc); atom == 0 {
+		panic("RegisterClassEx")
+	}
+}
 
 func main() {
-    // Register the "test" window to the system
-    RegisterClass()
+	// Register the "test" window to the system
+	RegisterClass()
 
-    // Create a window of "test" type
+	// Create a window of "test" type
 	var hwnd HWND = CreateWindowEx(
 		WS_EX_CLIENTEDGE,
 		// hwnd,
