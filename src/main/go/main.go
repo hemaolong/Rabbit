@@ -7,6 +7,17 @@ import (
 	"unsafe"
 )
 
+type BROWSEINFO struct {
+	Owner        HWND
+	Root         *uint16
+	DisplayName  *uint16
+	Title        *uint16
+	Flags        uint32
+	CallbackFunc uintptr
+	LParam       uintptr
+	Image        int32
+}
+
 const (
 	winWidth  int32 = 800
 	winHeight int32 = 600
@@ -21,6 +32,22 @@ var (
 
 func _TEXT(svt string) *uint16 {
 	return syscall.StringToUTF16Ptr(svt)
+}
+
+func createFolderBrower(parent HWND) {
+    createWindowEx := MustGetProcAddress(libuser32, "CreateWindowExW")
+    var BROWSEINFO
+        bi.Owner = parent
+        bi.Title = _TEXT("Select folder")
+        bi.Flags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE
+
+        w32.CoInitialize()
+        ret := w32.SHBrowseForFolder(&bi)
+        w32.CoUninitialize()
+
+        folder = w32.SHGetPathFromIDList(ret)
+        accepted = folder != ""
+
 }
 
 func createButton(x, y, w, h int32, parent HWND, text string, id int32) (result HWND) {
