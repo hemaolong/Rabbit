@@ -2,9 +2,13 @@ package main
 
 import (
 	. "github.com/lxn/go-winapi"
+	"image"
 	"os"
+	"path/filepath"
 	"syscall"
 	"unsafe"
+	// "gameimg"
+	//"fmt"
 )
 
 type BROWSEINFO struct {
@@ -28,26 +32,80 @@ const (
 var (
 	winProc  HWND
 	replaced bool = false
+
+	libshell  uintptr
+	libuser32 uintptr
 )
 
 func _TEXT(svt string) *uint16 {
 	return syscall.StringToUTF16Ptr(svt)
 }
 
+/////////////////////Image operation
+func ReadImage(path string) (image.Image, string, error) {
+	f, err := os.Open(path)
+	if err != nil {
+		return nil, "", err
+	}
+	defer f.Close()
+	return image.Decode(f)
+}
+
+func ReadImageList(path, ext string) []image.Image {
+	// Iterate the path, find all the image files as the ext.
+	imgFiles := make(map[string]int)
+	filepath.Walk(path,
+		func(p string, f os.FileInfo, err error) error {
+			if f.IsDir() {
+				return nil
+			}
+			imgFiles[f.Name()] = 1
+			return nil
+		})
+
+	// Read all the images
+	result := make([]image.Image, len(imgFiles))
+	return result
+}
+
+/////////////////////End Image operation
+
+func getPath(path uintptr) []uint16 {
+	var nameBuf [100]uint16
+	getPath := MustGetProcAddress(libshell, "SHGetPathFromIDListW")
+	syscall.Syscall(getPath,
+		2, uintptr(path), uintptr(unsafe.Pointer(&nameBuf[0])), 0)
+
+	return nameBuf[0:100]
+}
 func createFolderBrower(parent HWND) {
-    createWindowEx := MustGetProcAddress(libuser32, "CreateWindowExW")
-    var BROWSEINFO
-        bi.Owner = parent
-        bi.Title = _TEXT("Select folder")
-        bi.Flags = BIF_RETURNONLYFSDIRS | BIF_NEWDIALOGSTYLE
+	if libshell == 0 {
+		libshell = MustLoadLibrary("Shell32.dll")
+	}
+	if libuser32 == 0 {
+	}
+	libuser32 = MustLoadLibrary("Ole32.dll")
 
-        w32.CoInitialize()
-        ret := w32.SHBrowseForFolder(&bi)
-        w32.CoUninitialize()
+	var bi BROWSEINFO
+	bi.Owner = parent
+	bi.Title = _TEXT("Select")
+	bi.Flags = 1 | 2
 
-        folder = w32.SHGetPathFromIDList(ret)
-        accepted = folder != ""
+	coInitialize := MustGetProcAddress(libuser32, "CoInitialize")
+	syscall.Syscall(coInitialize, 1, 0, 0, 0)
+	//w32.CoInitialize()
+	sHBrowseForFolder := MustGetProcAddress(libshell, "SHBrowseForFolderW")
+	ret, _, _ := syscall.Syscall(sHBrowseForFolder,
+		1, uintptr(unsafe.Pointer(&bi)), 0, 0)
 
+	coUninitialize := MustGetProcAddress(libuser32, "CoUninitialize")
+	syscall.Syscall(coUninitialize, 0, 0, 0, 0)
+
+	path := syscall.UTF16ToString(getPath(ret))
+	println(path)
+	// ReadImageList(path, "png")
+
+	//println(len(imgList))
 }
 
 func createButton(x, y, w, h int32, parent HWND, text string, id int32) (result HWND) {
@@ -111,11 +169,12 @@ func WndProc(hwnd HWND, msg uint32, wparam uintptr, lparam uintptr) uintptr {
 			dumb.LpstrFilter = (*uint16)(_TEXT("All Files (*.png)"))
 			dumb.Flags = OFN_ENABLEHOOK | OFN_EXPLORER
 
-
 			// Trigger the open
 			dumb.LpfnHook = LPOFNHOOKPROC(openCb)
 
-			GetOpenFileName(&dumb)
+			// GetOpenFileName(&dumb)
+
+			createFolderBrower(hwnd)
 		}
 		return 0
 	case WM_DESTROY:
@@ -123,7 +182,7 @@ func WndProc(hwnd HWND, msg uint32, wparam uintptr, lparam uintptr) uintptr {
 	}
 
 	if winProc == 0 {
-		println(=========================");
+		println("=========================")
 		winProc = hwnd
 	}
 

@@ -1,4 +1,4 @@
-package gameimg
+package main
 
 
 import(
