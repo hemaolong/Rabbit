@@ -3,8 +3,10 @@ package main
 import (
 	. "github.com/lxn/go-winapi"
 	"image"
+	_ "image/png"
 	"os"
 	"path/filepath"
+	"reflect"
 	"syscall"
 	"unsafe"
 	// "gameimg"
@@ -30,11 +32,10 @@ const (
 )
 
 var (
-	winProc  HWND
-	replaced bool = false
-
-	libshell  uintptr
-	libuser32 uintptr
+	libshell    uintptr
+	libuser32   uintptr
+	folderRoot  *uint16
+	imageLoaded map[string]image.Image
 )
 
 func _TEXT(svt string) *uint16 {
@@ -42,30 +43,48 @@ func _TEXT(svt string) *uint16 {
 }
 
 /////////////////////Image operation
-func ReadImage(path string) (image.Image, string, error) {
+func readImge(path string) (image.Image, error) {
 	f, err := os.Open(path)
 	if err != nil {
-		return nil, "", err
+		return nil, err
 	}
 	defer f.Close()
-	return image.Decode(f)
+
+	img, _, err := image.Decode(f)
+	if err != nil {
+		panic(err)
+	}
+	return img, err
 }
 
-func ReadImageList(path, ext string) []image.Image {
-	// Iterate the path, find all the image files as the ext.
-	imgFiles := make(map[string]int)
-	filepath.Walk(path,
-		func(p string, f os.FileInfo, err error) error {
-			if f.IsDir() {
-				return nil
-			}
-			imgFiles[f.Name()] = 1
-			return nil
-		})
+func ReadImageList(path, ext string) (map[string]image.Image, error) {
+	folder, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
 
-	// Read all the images
-	result := make([]image.Image, len(imgFiles))
-	return result
+	// Read all the files in the folder
+	fileList, err := folder.Readdir(-1)
+	if err != nil {
+		return nil, err
+	}
+
+	// Read all png images
+	fileMap := make(map[string]image.Image)
+	for _, v := range fileList {
+		if !v.IsDir() {
+			fname := v.Name()
+			ext := filepath.Ext(fname)
+			if ext == ".png" {
+				img, err := readImge(path + "/" + fname)
+				if err == nil {
+					fileMap[fname] = img
+				}
+
+			}
+		}
+	}
+	return fileMap, nil
 }
 
 /////////////////////End Image operation
@@ -88,8 +107,9 @@ func createFolderBrower(parent HWND) {
 
 	var bi BROWSEINFO
 	bi.Owner = parent
+	bi.Root = folderRoot
 	bi.Title = _TEXT("Select")
-	bi.Flags = 1 | 2
+	bi.Flags = 0x10 | 0x40
 
 	coInitialize := MustGetProcAddress(libuser32, "CoInitialize")
 	syscall.Syscall(coInitialize, 1, 0, 0, 0)
@@ -97,15 +117,24 @@ func createFolderBrower(parent HWND) {
 	sHBrowseForFolder := MustGetProcAddress(libshell, "SHBrowseForFolderW")
 	ret, _, _ := syscall.Syscall(sHBrowseForFolder,
 		1, uintptr(unsafe.Pointer(&bi)), 0, 0)
+	if ret == 0 {
+		return
+	}
 
 	coUninitialize := MustGetProcAddress(libuser32, "CoUninitialize")
 	syscall.Syscall(coUninitialize, 0, 0, 0, 0)
 
 	path := syscall.UTF16ToString(getPath(ret))
-	println(path)
-	// ReadImageList(path, "png")
+	folderRoot = (*uint16)(unsafe.Pointer(ret))
 
-	//println(len(imgList))
+	imgList, err := ReadImageList(path, "png")
+	if err != nil {
+		panic(err)
+		return
+	}
+	imageLoaded = imgList
+	println(len(imageLoaded))
+	drawFrame(parent)
 }
 
 func createButton(x, y, w, h int32, parent HWND, text string, id int32) (result HWND) {
@@ -124,24 +153,42 @@ func createButton(x, y, w, h int32, parent HWND, text string, id int32) (result 
 }
 
 func LoadPath(hwnd HWND, msg uint32, wparam uintptr, lparam uintptr) uintptr {
+	return DefWindowProc(hwnd, msg, wparam, lparam)
+}
 
-	if hwnd != 0 && !replaced {
-		println("replace the win proc")
-		parentHwnd := GetParent(hwnd)
-		if parentHwnd == hwnd {
-			replaced = true
-			winProc = HWND(SetWindowLong(parentHwnd, GWL_WNDPROC,
-				int32(syscall.NewCallback(WndProc))))
-		}
+func drawFrame(hwnd HWND) {
+	if imageLoaded == nil {
+		return
 	}
+	// 	var ps GetWindowDCSTRUCT
+	hdc := GetDC(hwnd)
 
-	if msg == WM_NOTIFY {
-		println("notifyffffffffffff")
+	cdc := CreateCompatibleDC(0)
+	defer DeleteDC(cdc)
+
+	for _, img := range imageLoaded {
+		var w int32 = int32(img.Bounds().Max.X - img.Bounds().Min.X)
+		var h int32 = int32(img.Bounds().Max.Y - img.Bounds().Min.Y)
+
+		println("type")
+		println(reflect.TypeOf(img).Name())
+		rgba:= img.(*image.NRGBA)
+		print(rgba)
+
+
+		// println(len(rgba.Pix))
+		println("->")
+		println(rgba.Pix)
+
+		planes := GetDeviceCaps(hdc, PLANES)
+		bmp := CreateBitmap(w, planes, 1, 24, unsafe.Pointer(&rgba.Pix[0]))
+		hbmpOld := SelectObject(cdc, HGDIOBJ(bmp))
+		defer SelectObject(cdc, HGDIOBJ(hbmpOld))
+
+		BitBlt(hdc, 0, 0, w, h, cdc, 0, 0, SRCCOPY)
+		break
 	}
-
-	// println("fffffffffff");
-	// return DefWindowProc(winProc, msg, wparam, lparam)
-	return 0
+	// EndPaint(hwnd, &ps)
 }
 
 func WndProc(hwnd HWND, msg uint32, wparam uintptr, lparam uintptr) uintptr {
@@ -151,12 +198,12 @@ func WndProc(hwnd HWND, msg uint32, wparam uintptr, lparam uintptr) uintptr {
 	case WM_CREATE:
 		createButton(10, 10, 100, 40, hwnd, "Open", OPEN_BTN_ID)
 		return 0
+	case WM_PAINT:
+		drawFrame(hwnd)
+		// return 0
 
 	case WM_COMMAND:
 		wid := LOWORD(uint32(wparam))
-		if wparam == IDOK {
-			println("OK       clicked")
-		}
 		if wid == uint16(OPEN_BTN_ID) {
 			// MessageBox(hwnd, _TEXT("hi"), _TEXT("kill U"), MB_OK)
 			var nameBuf [100]uint16
@@ -181,12 +228,7 @@ func WndProc(hwnd HWND, msg uint32, wparam uintptr, lparam uintptr) uintptr {
 		os.Exit(0)
 	}
 
-	if winProc == 0 {
-		println("=========================")
-		winProc = hwnd
-	}
-
-	return DefWindowProc(winProc, msg, wparam, lparam)
+	return DefWindowProc(hwnd, msg, wparam, lparam)
 }
 
 //Register WndClass
