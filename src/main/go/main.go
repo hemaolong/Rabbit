@@ -6,23 +6,24 @@ import (
 	_ "image/png"
 	"os"
 	"path/filepath"
-	"reflect"
 	"syscall"
 	"unsafe"
 	// "gameimg"
 	//"fmt"
 )
 
-type BROWSEINFO struct {
-	Owner        HWND
-	Root         *uint16
-	DisplayName  *uint16
-	Title        *uint16
-	Flags        uint32
-	CallbackFunc uintptr
-	LParam       uintptr
-	Image        int32
-}
+type (
+	BROWSEINFO struct {
+		Owner        HWND
+		Root         *uint16
+		DisplayName  *uint16
+		Title        *uint16
+		Flags        uint32
+		CallbackFunc uintptr
+		LParam       uintptr
+		Image        int32
+	}
+)
 
 const (
 	winWidth  int32 = 800
@@ -32,6 +33,7 @@ const (
 )
 
 var (
+	libgdi32    uintptr
 	libshell    uintptr
 	libuser32   uintptr
 	folderRoot  *uint16
@@ -98,12 +100,6 @@ func getPath(path uintptr) []uint16 {
 	return nameBuf[0:100]
 }
 func createFolderBrower(parent HWND) {
-	if libshell == 0 {
-		libshell = MustLoadLibrary("Shell32.dll")
-	}
-	if libuser32 == 0 {
-	}
-	libuser32 = MustLoadLibrary("Ole32.dll")
 
 	var bi BROWSEINFO
 	bi.Owner = parent
@@ -133,8 +129,7 @@ func createFolderBrower(parent HWND) {
 		return
 	}
 	imageLoaded = imgList
-	println(len(imageLoaded))
-	drawFrame(parent)
+	drawFrame(parent, 0)
 }
 
 func createButton(x, y, w, h int32, parent HWND, text string, id int32) (result HWND) {
@@ -156,39 +151,50 @@ func LoadPath(hwnd HWND, msg uint32, wparam uintptr, lparam uintptr) uintptr {
 	return DefWindowProc(hwnd, msg, wparam, lparam)
 }
 
-func drawFrame(hwnd HWND) {
+func drawFrame(hwnd HWND, hdc HDC) {
 	if imageLoaded == nil {
 		return
 	}
 	// 	var ps GetWindowDCSTRUCT
-	hdc := GetDC(hwnd)
+	if hdc == 0 {
+		hdc = GetDC(hwnd)
+	}
 
 	cdc := CreateCompatibleDC(0)
 	defer DeleteDC(cdc)
 
 	for _, img := range imageLoaded {
-		var w int32 = int32(img.Bounds().Max.X - img.Bounds().Min.X)
-		var h int32 = int32(img.Bounds().Max.Y - img.Bounds().Min.Y)
+		w := img.Bounds().Max.X - img.Bounds().Min.X
+		h := img.Bounds().Max.Y - img.Bounds().Min.Y
 
-		println("type")
-		println(reflect.TypeOf(img).Name())
-		rgba:= img.(*image.NRGBA)
-		print(rgba)
+		// Create Bit map
+		createbmp := MustGetProcAddress(libgdi32, "CreateCompatibleBitmap")
+		syscall.Syscall(createbmp,
+			3, uintptr(hdc), uintptr(w), uintptr(h))
+		// End create
 
+		setPix := MustGetProcAddress(libgdi32, "SetPixelV")
+		for row := 0; row < w; row++ {
+			for col := 0; col < h; col++ {
+				_r, _g, _b, _a := img.At(row, col).RGBA()
+				color := _r
+				color |= uint32(_g) << 8
+				color |= uint32(_b << 16)
+				color |= uint32(_a << 24)
 
-		// println(len(rgba.Pix))
-		println("->")
-		println(rgba.Pix)
+				syscall.Syscall6(setPix,
+					4, uintptr(hdc),
+					uintptr(row), uintptr(col),
+					uintptr(color), 0, 0)
+			}
+		}
 
-		planes := GetDeviceCaps(hdc, PLANES)
-		bmp := CreateBitmap(w, planes, 1, 24, unsafe.Pointer(&rgba.Pix[0]))
-		hbmpOld := SelectObject(cdc, HGDIOBJ(bmp))
-		defer SelectObject(cdc, HGDIOBJ(hbmpOld))
+		// hbmpOld := SelectObject(cdc, HGDIOBJ(bmp))
+		// defer SelectObject(cdc, HGDIOBJ(hbmpOld))
 
-		BitBlt(hdc, 0, 0, w, h, cdc, 0, 0, SRCCOPY)
+		BitBlt(hdc, 0, 0, int32(w), int32(h), cdc, 0, 0, SRCCOPY)
 		break
 	}
-	// EndPaint(hwnd, &ps)
 }
 
 func WndProc(hwnd HWND, msg uint32, wparam uintptr, lparam uintptr) uintptr {
@@ -199,7 +205,10 @@ func WndProc(hwnd HWND, msg uint32, wparam uintptr, lparam uintptr) uintptr {
 		createButton(10, 10, 100, 40, hwnd, "Open", OPEN_BTN_ID)
 		return 0
 	case WM_PAINT:
-		drawFrame(hwnd)
+		var ps PAINTSTRUCT
+		hdc := BeginPaint(hwnd, &ps)
+		drawFrame(hwnd, hdc)
+		EndPaint(hwnd, &ps)
 		// return 0
 
 	case WM_COMMAND:
@@ -257,6 +266,12 @@ func RegisterClass() {
 	if atom := RegisterClassEx(&wc); atom == 0 {
 		panic("RegisterClassEx")
 	}
+}
+
+func init() {
+	libshell = MustLoadLibrary("Shell32.dll")
+	libuser32 = MustLoadLibrary("Ole32.dll")
+	libgdi32 = MustLoadLibrary("Gdi32.dll")
 }
 
 func main() {
