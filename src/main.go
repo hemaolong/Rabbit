@@ -1,17 +1,14 @@
-// Copyright 2010 The Walk Authors. All rights reserved.
-// Use of this source code is governed by a BSD-style
-// license that can be found in the LICENSE file.
-
 package main
 
 import (
 	"image"
+	_ "image/png"
 	"os"
 	"path/filepath"
 	"time"
 
-	"github.com/lxn/walk"
 	"github.com/lxn/go-winapi"
+	"github.com/lxn/walk"
 
 	// Self
 	selfWidget "mywidget"
@@ -28,18 +25,19 @@ type (
 	MainWindow struct {
 		*walk.MainWindow
 		imageView    *walk.ImageView
+		paintWidget  *walk.CustomWidget
 		prevFilePath string
-		frameTimer   int
 
 		// Other ui
 		uiFrameCnt *walk.NumberEdit
-		uiPoseCnt *walk.LineEdit
+		uiPoseCnt  *walk.LineEdit
 	}
 
 	// Image struct
 	ImageItem struct {
 		fname string
 		bm    *walk.Bitmap
+		img   image.Image
 	}
 )
 
@@ -49,6 +47,8 @@ var (
 	currentFrame int
 	imageW       int
 	imageH       int
+
+	boundary image.Rectangle = image.Rect(0, 0, 0, 0)
 
 	// ui
 	frameCount int = 8 // The frame count of a pose
@@ -68,6 +68,22 @@ func readImge(path string) (image.Image, error) {
 		panic(err)
 	}
 	return img, err
+}
+
+func parseImgBoundary(img image.Image) {
+	minX, maxX := img.Bounds().Min.X, img.Bounds().Max.X
+	minY, maxY := img.Bounds().Min.Y, img.Bounds().Max.Y
+	for i := minX; i < maxX; i++ {
+		for j := minY; j < maxY; j++ {
+			_, _, _, a := img.At(i, j).RGBA()
+			if a == 0 {
+				_p := image.Point{i, j}
+				if !_p.In(boundary) {
+					boundary = boundary.Union(image.Rect(i, j, i, j))
+				}
+			}
+		}
+	}
 }
 
 func ReadImageList(path, ext string) error {
@@ -90,20 +106,20 @@ func ReadImageList(path, ext string) error {
 			fname := v.Name()
 			curExt := filepath.Ext(fname)
 			if curExt == ext {
-				//img, err := readImge(path + "/" + fname)
-				//if err == nil {
-				//	fileMap[fname] = img
-				//}
 				imgList = append(imgList)
 				fullname := path + "/" + fname
 				if bm, err := walk.NewBitmapFromFile(fullname); err == nil {
 					newImg := new(ImageItem)
 					newImg.fname = fullname
 					newImg.bm = bm
-					imgList = append(imgList, newImg)
+					newImg.img, err = readImge(fullname)
+					if err == nil {
+						imgList = append(imgList, newImg)
 
-					imageW = bm.Size().Width
-					imageH = bm.Size().Height
+						imageW = bm.Size().Width
+						imageH = bm.Size().Height
+						parseImgBoundary(newImg.img)
+					}
 				}
 
 			}
@@ -115,41 +131,11 @@ func ReadImageList(path, ext string) error {
 /////////////End image opration
 
 func (mw *MainWindow) openImage() {
-	//dlg := &walk.FileDialog{}
-
-	//dlg.FilePath = mw.prevFilePath
-	//dlg.Filter = "Image Files (*.emf;*.bmp;*.exif;*.gif;*.jpeg;*.jpg;*.png;*.tiff)|*.emf;*.bmp;*.exif;*.gif;*.jpeg;*.jpg;*.png;*.tiff"
-	//dlg.Title = "Select an Image"
-
-	//if ok, _ := dlg.ShowOpen(mw); !ok {
-	//	return
-	//}
 	folderPath := selfWidget.GetPath(0, 0)
 	if err := ReadImageList(folderPath, ".png"); err != nil {
 		return
 	}
 	mw.setImageSize()
-
-	//mw.prevFilePath = folderPath// dlg.FilePath
-
-	// img, _ := walk.NewImageFromFile(dlg.FilePath)
-
-	//page, _ := walk.NewTabPage()
-	// page.SetTitle(path.Base(strings.Replace(dlg.FilePath, "\\", "/", -1)))
-	//page.SetLayout(walk.NewHBoxLayout())
-
-	//var succeeded bool
-	//defer func() {
-	//	if !succeeded {
-	// page.Dispose()
-	//	}
-	//}()
-
-	// imageView.SetImage(img)
-	// mw.tabWidget.Pages().Add(page)
-	// mw.tabWidget.SetCurrentIndex(mw.tabWidget.Pages().Len() - 1)
-
-	//succeeded = true
 }
 
 func (mw *MainWindow) drawImage() {
@@ -163,8 +149,35 @@ func (mw *MainWindow) drawImage() {
 	mw.imageView.SetImage(imgList[f].bm)
 }
 
+// Calc the image size, draw the image boundary
 func (mw *MainWindow) setImageSize() {
 	mw.imageView.SetSize(walk.Size{imageW, imageH})
+}
+
+func (mw *MainWindow) drawBoundary(canvas *walk.Canvas, updateBounds walk.Rectangle) error {
+	// bmp, _ := walk.NewBitmap(walk.Size{imageW, imageH})
+	// canvas, _ := walk.NewCanvasFromImage(bmp)
+
+	rectPen, _ := walk.NewCosmeticPen(walk.PenSolid, walk.RGB(255, 255, 255))
+	if boundary.Empty() {
+		return nil
+	}
+
+	x := boundary.Min.X
+	y := boundary.Min.Y
+	w := boundary.Dx()
+	h := boundary.Dy()
+
+	canvas.DrawRectangle(rectPen, walk.Rectangle{x, y, w, h})
+
+	println(x)
+	println(y)
+	println(w)
+	println(h)
+
+	defer rectPen.Dispose()
+	println("draw")
+	return nil
 }
 
 func (mw *MainWindow) initFrame() {
@@ -199,11 +212,6 @@ func (mw *MainWindow) initMenu() {
 	fileMenu.Actions().Add(openAction)
 	mw.ToolBar().Actions().Add(openAction)
 
-	exitAction := walk.NewAction()
-	exitAction.SetText("E&xit")
-	exitAction.Triggered().Attach(func() { walk.App().Exit(0) })
-	fileMenu.Actions().Add(exitAction)
-
 	helpMenu, _ := walk.NewMenu()
 	helpMenuAction, _ := mw.Menu().Actions().AddMenu(helpMenu)
 	helpMenuAction.SetText("&Help")
@@ -222,38 +230,57 @@ func (mw *MainWindow) initMenu() {
 	composeAction.Triggered().Attach(func() { mw.composeImg() })
 	fileMenu.Actions().Add(composeAction)
 	mw.ToolBar().Actions().Add(composeAction)
+
+	// Exit
+	exitAction := walk.NewAction()
+	exitAction.SetText("E&xit")
+	exitAction.Triggered().Attach(func() { walk.App().Exit(0) })
+	fileMenu.Actions().Add(exitAction)
 }
 
 func (mw *MainWindow) initCanvas() {
+	comp, _ := walk.NewComposite(mw)
+	// comp.Children().observer = mw
 	// Init image view
-	iv, _ := walk.NewImageView(mw)
+	iv, _ := walk.NewImageView(comp)
 	mw.imageView = iv
 	mw.initFrame()
+
+	mw.paintWidget, _ = walk.NewCustomWidget(comp, 0,
+		func(canvas *walk.Canvas, updateBounds walk.Rectangle) error {
+			return mw.drawBoundary(canvas, updateBounds)
+		})
+	mw.paintWidget.SetSize(walk.Size{600, 600})
+	mw.paintWidget.SetClearsBackground(true)
+	mw.paintWidget.SetInvalidatesOnResize(true)
 }
 func (mw *MainWindow) initOtherBars() {
 	sp, _ := walk.NewSplitter(mw)
-	sp.SetSize(walk.Size{800, TB_H})
+	sp.SetSize(walk.Size{400, TB_H})
 	walk.NewHSpacer(sp)
 	walk.NewHSpacer(sp)
 	// others
 	mw.uiFrameCnt, _ = walk.NewNumberEdit(sp)
 	mw.uiFrameCnt.SetSize(walk.Size{32, TB_H})
 	mw.uiFrameCnt.SetRange(1, 100)
+	mw.uiFrameCnt.SetDecimals(0)
 
+	walk.NewSplitter(sp)
 
-	lab, _ := walk.NewLineEdit(sp)
-	lab.SetSize(walk.Size{32, 30})
-	lab.SetReadOnly(true)
+	lab, _ := walk.NewLabel(sp)
+	lab.SetSize(walk.Size{16, 30})
+	lab.SetText("Pose")
 
 	mw.uiPoseCnt, _ = walk.NewLineEdit(sp)
 	mw.uiPoseCnt.SetSize(walk.Size{32, 30})
 
 	// Space
 
-
 	walk.InitWidget(sp, mw, FREEZEIZE_CLASS,
-					winapi.CCS_NORESIZE,
-					winapi.WS_EX_TOOLWINDOW | winapi.WS_EX_WINDOWEDGE)
+		winapi.CCS_NORESIZE,
+		winapi.WS_EX_TOOLWINDOW|winapi.WS_EX_WINDOWEDGE)
+
+	walk.NewSplitter(mw)
 }
 
 func newMainWindow() {
@@ -263,18 +290,19 @@ func newMainWindow() {
 	mw := &MainWindow{MainWindow: mainWnd}
 	mw.SetLayout(walk.NewVBoxLayout())
 	mw.SetTitle("Image composer")
-	mw.SetMinMaxSize(walk.Size{800, 600}, walk.Size{})
-	mw.SetSize(walk.Size{800, 600})
 
 	mw.initMenu()
 	mw.initOtherBars()
 	mw.initCanvas()
+
+	mw.SetMinMaxSize(walk.Size{800, 600}, walk.Size{})
+	mw.SetSize(walk.Size{800, 600})
 	mw.Show()
 	mw.Run()
 }
 
 func init() {
-    walk.MustRegisterWindowClass(FREEZEIZE_CLASS)
+	walk.MustRegisterWindowClass(FREEZEIZE_CLASS)
 }
 
 func main() {
