@@ -2,7 +2,7 @@
 // Use of this source code is governed by a BSD-style
 // license that can be found in the LICENSE file.
 
-package MyWidget
+package mywidget
 
 import (
 	"github.com/lxn/go-winapi"
@@ -59,4 +59,29 @@ func GetPath(parent winapi.HWND, path uintptr) string {
 
 	return syscall.UTF16ToString(nameBuf[:])
 
+}
+
+func GetSavePath(parent winapi.HWND) string {
+    ofn := &winapi.OPENFILENAME{}
+
+	ofn.LStructSize = uint32(unsafe.Sizeof(*ofn))
+	ofn.HwndOwner = parent
+
+	filter := make([]uint16, 124)
+	ofn.LpstrFilter = &filter[0]
+	ofn.NFilterIndex = 1
+
+	filePath := make([]uint16, 124)
+	ofn.LpstrFile = &filePath[0]
+	ofn.NMaxFile = uint32(len(filePath))
+
+	// ofn.LpstrInitialDir = syscall.StringToUTF16Ptr(dlg.InitialDirPath)
+	// ofn.LpstrTitle = syscall.StringToUTF16Ptr(dlg.Title)
+	ofn.Flags = winapi.OFN_FILEMUSTEXIST
+
+	if ret := winapi.GetSaveFileName(ofn); !ret {
+		return ""
+	}
+
+	return syscall.UTF16ToString(filePath)
 }
