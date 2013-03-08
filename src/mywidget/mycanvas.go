@@ -5,16 +5,21 @@
 package mywidget
 
 import (
-    "github.com/lxn/walk"
+	. "github.com/lxn/walk"
 )
 
-type ImageView struct {
-	*walk.CustomWidget
-	image Image
-}
+type (
+	MyImageView struct {
+		*CustomWidget
+		image Image
 
-func NewImageView(parent Container) (*ImageView, error) {
-	iv := &ImageView{}
+		x, y, w, h int
+		boundPen   *CosmeticPen
+	}
+)
+
+func NewMyImageView(parent Container) (*MyImageView, error) {
+	iv := &MyImageView{}
 
 	cw, err := NewCustomWidget(parent, 0, func(canvas *Canvas, updateBounds Rectangle) error {
 		return iv.drawImage(canvas, updateBounds)
@@ -25,14 +30,14 @@ func NewImageView(parent Container) (*ImageView, error) {
 
 	iv.CustomWidget = cw
 
-	iv.widget = iv
+	// iv.widget = iv
 
 	iv.SetInvalidatesOnResize(true)
 
 	return iv, nil
 }
 
-func (iv *ImageView) SetImage(value Image) error {
+func (iv *MyImageView) SetImage(value Image) error {
 	iv.image = value
 
 	_, isMetafile := value.(*Metafile)
@@ -41,12 +46,31 @@ func (iv *ImageView) SetImage(value Image) error {
 	return iv.Invalidate()
 }
 
-func (iv *ImageView) drawImage(canvas *Canvas, updateBounds Rectangle) error {
-	if iv.image == nil {
+func (iv *MyImageView) SetBoundary(x, y, w, h int) {
+	iv.x = x
+	iv.y = y
+	iv.w = w
+	iv.h = h
+}
+
+func (mw *MyImageView) drawBoundary(canvas *Canvas, updateBounds Rectangle) error {
+	if mw.w == 0 && mw.h == 0 {
 		return nil
 	}
 
-	bounds := iv.ClientBounds()
+	if mw.boundPen == nil {
+		mw.boundPen, _ = NewCosmeticPen(PenSolid, RGB(255, 255, 255))
+		return nil
+	}
+	canvas.DrawRectangle(mw.boundPen, Rectangle{mw.x, mw.y, mw.w, mw.h})
+	return nil
+}
 
-	return canvas.DrawImageStretched(iv.image, bounds)
+func (iv *MyImageView) drawImage(canvas *Canvas, updateBounds Rectangle) error {
+	if iv.image == nil {
+		return nil
+	}
+	canvas.DrawImage(iv.image, Point{0, 0})
+
+	return iv.drawBoundary(canvas, updateBounds)
 }

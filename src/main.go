@@ -3,12 +3,12 @@ package main
 import (
 	"fmt"
 	"image"
+	"image/color"
 	"image/draw"
 	"image/png"
 	"os"
 	"path/filepath"
 	"time"
-	"image/color"
 
 	"github.com/lxn/go-winapi"
 	"github.com/lxn/walk"
@@ -18,16 +18,11 @@ import (
 )
 
 type ImageExt interface {
-    ColorModel() color.Model
-	// Bounds returns the domain for which At can return non-zero color.
-	// The bounds do not necessarily contain the point (0, 0).
+	ColorModel() color.Model
 	Bounds() image.Rectangle
-	// At returns the color of the pixel at (x, y).
-	// At(Bounds().Min.X, Bounds().Min.Y) returns the upper-left pixel of the grid.
-	// At(Bounds().Max.X-1, Bounds().Max.Y-1) returns the lower-right one.
 	At(x, y int) color.Color
 
-	Set(x, y int, c color.Color)
+	// (x, y, stride int)
 
 	SubImage(image.Rectangle) image.Image
 }
@@ -113,6 +108,17 @@ func parseImgBoundary(img image.Image) {
 			}
 		}
 	}
+
+	// Should Make the the midline of boundary and the img
+	l := boundary.Min.X
+	r := imageW - boundary.Max.X
+	if l > r {
+		boundary.Min.X = r
+	} else if l < r {
+		boundary.Max.X = imageW - l
+	}
+
+	fmt.Printf("%v\n", img.ColorModel())
 }
 
 func readPoseImage(path, ext string) {
@@ -205,9 +211,11 @@ func (mw *MainWindow) openImage() {
 	mw.setImageSize()
 }
 
-func (mw *MainWindow) saveImage(){
-    path := selfWidget.GetSavePath(0)
-    mw.composeImg(path)
+func (mw *MainWindow) saveImage() {
+	path := selfWidget.GetSavePath(0,
+	    "(All Images) |*.png|*.jpg",
+	    "dumb.png")
+	mw.composeImg(path)
 }
 
 func (mw *MainWindow) drawImage() {
@@ -262,32 +270,49 @@ func (mw *MainWindow) composeImg(fullname string) {
 	if frame == 0 {
 		return
 	}
-	fmt.Printf("pose: %v, per frame %v\n", poseCnt, frame)
 
 	var result draw.Image
 	sw := boundary.Dx()
 	sh := boundary.Dy()
 
-	_newBound := boundary
-	_newBound = _newBound.Add(image.Point{sw * (frame - 1), sh * poseCnt})
+	//var rgba bool
+	_newBound := image.Rect(0, 0, sw*frame, sh*poseCnt)
 	firstImg := imgList[0].img
 	switch firstImg.(type) {
 	case *image.RGBA:
 		result = image.NewRGBA(_newBound)
+		//rgba = true
 	case *image.NRGBA:
 		result = image.NewNRGBA(_newBound)
+		//rgba = false
 	default:
 		return
 	}
 
-	for _, _img := range imgList {
+	singleBound := image.Rect(0, 0, sw, sh)
+	for i, _img := range imgList {
 		_subImg := _img.img.SubImage(boundary)
-		draw.Draw(result, boundary, _subImg, _subImg.Bounds().Min, draw.Src)
+		col := i % frame
+		row := i / frame
+		drawBound := singleBound.Add(image.Point{sw * col, sh * row})
+		draw.Draw(result, drawBound, _subImg, _subImg.Bounds().Min, draw.Src)
 	}
+	// Modify stride
 
-	f, err := os.OpenFile(fullname, os.O_RDWR, os.ModePerm)
+	/*
+	if rgba {
+		result.(*image.RGBA).Stride = 8
+		println(result.(*image.RGBA).Stride)
+	} else {
+		result.(*image.NRGBA).Stride = 8
+		println(result.(*image.NRGBA).Stride)
+	}
+	*/
+
+	f, err := os.OpenFile(fullname, os.O_RDWR|os.O_CREATE, os.ModePerm)
 	if err != nil {
-	    return
+		panic(err)
+		return
 	}
 	defer f.Close()
 	f.Truncate(0)
@@ -337,6 +362,7 @@ func (mw *MainWindow) initMenu() {
 }
 
 func (mw *MainWindow) initCanvas() {
+    walk.NewHSpacer(mw)
 	iv, _ := selfWidget.NewMyImageView(mw)
 	mw.imageView = iv
 	mw.initFrame()
