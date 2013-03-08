@@ -1,7 +1,7 @@
 package main
 
 import (
-	"fmt"
+	// "fmt"
 	"image"
 	"image/color"
 	"image/draw"
@@ -45,7 +45,6 @@ type (
 	MainWindow struct {
 		*walk.MainWindow
 		imageView    *selfWidget.MyImageView
-		prevFilePath string
 
 		// Other ui
 		uiFrameCnt *walk.NumberEdit
@@ -109,7 +108,7 @@ func parseImgBoundary(img image.Image) {
 		}
 	}
 
-	// Should Make the the midline of boundary and the img
+	// Should Make the midline of boundary and the img
 	l := boundary.Min.X
 	r := imageW - boundary.Max.X
 	if l > r {
@@ -117,8 +116,6 @@ func parseImgBoundary(img image.Image) {
 	} else if l < r {
 		boundary.Max.X = imageW - l
 	}
-
-	fmt.Printf("%v\n", img.ColorModel())
 }
 
 func readPoseImage(path, ext string) {
@@ -214,7 +211,7 @@ func (mw *MainWindow) openImage() {
 func (mw *MainWindow) saveImage() {
 	path := selfWidget.GetSavePath(0,
 	    "(All Images) |*.png|*.jpg",
-	    "dumb.png")
+	    ".png")
 	mw.composeImg(path)
 }
 
