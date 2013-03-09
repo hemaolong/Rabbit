@@ -214,6 +214,8 @@ func (mw *MainWindow) openImage(mode int) {
 		mw.refreshTimer.Stop()
 	}
 
+	boundary = image.Rect(-1, -1, -1, -1)
+
 	if fs.IsDir() {
 		readImageList(folderPath, ".png")
 		mw.setImageSize()
@@ -231,6 +233,9 @@ func (mw *MainWindow) openImage(mode int) {
 
 func (mw *MainWindow) saveImage() {
 	path := selfWidget.GetSavePath(0)
+	if len(path) == 0 {
+		return
+	}
 	//"(All Images) |*.png|*.jpg",
 	//".png")
 	mw.composeImg(path)
@@ -251,6 +256,7 @@ func (mw *MainWindow) drawImage() {
 func (mw *MainWindow) setImageSize() {
 	mw.imageView.SetSize(walk.Size{imageW, imageH})
 
+	fmt.Printf("Boundary %v\n", boundary)
 	mw.imageView.SetBoundary(boundary.Min.X, boundary.Min.Y,
 		boundary.Dx(), boundary.Dy())
 }
@@ -259,8 +265,6 @@ func (mw *MainWindow) initFrame() {
 	mw.refreshTimer = time.NewTicker(time.Millisecond * 83)
 	go func() {
 		for _ = range mw.refreshTimer.C {
-			// <-timer.C
-			// fmt.Println(t)
 			mw.drawImage()
 		}
 
@@ -274,6 +278,9 @@ func (mw *MainWindow) onClickSave() {
 		return
 	}
 
+	imageW = modelItem.img.Bounds().Dx()
+	imageH = modelItem.img.Bounds().Dy()
+
 	poseCnt := int(mw.uiPoseCnt.Value())
 	if poseCnt <= 0 {
 		poseCnt = 1
@@ -286,7 +293,6 @@ func (mw *MainWindow) onClickSave() {
 	imgList = _iniImgList[0:0]
 	boundary = image.Rect(0, 0, imageW, imageH)
 	tmpBound := boundary
-	fmt.Printf("image w: %d, h: %d\n", imageW, imageH)
 	// Read all png images
 	for i := 0; i < poseCnt; i++ {
 		for j := 0; j < frame; j++ {
@@ -297,12 +303,12 @@ func (mw *MainWindow) onClickSave() {
 			newImg := new(ImageItem)
 			newImg.fname = ""
 			newImg.img = modelItem.img.SubImage(tmpBound).(ImageExt)
-			fmt.Printf("pose: %v\n", tmpBound)
 			newImg.bm, _ = walk.NewBitmapFromImage(newImg.img)
 
 			imgList = append(imgList, newImg)
 		}
 	}
+	mw.setImageSize()
 }
 
 func (mw *MainWindow) refreshToolBar(mode int) {
