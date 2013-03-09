@@ -38,6 +38,28 @@ func init() {
 	libshell = winapi.MustLoadLibrary("Shell32.dll")
 }
 
+func GetOpenFileName(parent winapi.HWND, path uintptr) string {
+	ofn := &winapi.OPENFILENAME{}
+
+	ofn.LStructSize = uint32(unsafe.Sizeof(*ofn))
+	ofn.HwndOwner = parent
+
+	filter := make([]uint16, 124)
+	ofn.LpstrFilter = &filter[0]
+	ofn.NFilterIndex = 1
+
+	filePath := make([]uint16, 124)
+	ofn.LpstrFile = &filePath[0]
+	ofn.NMaxFile = uint32(len(filePath))
+
+	//w32.CoInitialize()
+	winapi.GetOpenFileName(ofn)
+
+
+	return syscall.UTF16ToString(filePath[:])
+
+}
+
 func GetPath(parent winapi.HWND, path uintptr) string {
 	var bi BROWSEINFO
 	bi.Owner = parent

@@ -1,7 +1,7 @@
 package main
 
 import (
-	// "fmt"
+	"fmt"
 	"image"
 	"image/color"
 	"image/draw"
@@ -39,17 +39,21 @@ const (
 	// MODE
 	MODE_COMPOSE int = 0
 	MODE_PLAY    int = 1
+	MODE_INVALID int = 3
 )
 
 type (
 	MainWindow struct {
 		*walk.MainWindow
-		imageView    *selfWidget.MyImageView
+		imageView *selfWidget.MyImageView
 
 		// Other ui
 		uiFrameCnt *walk.NumberEdit
 		uiPoseCnt  *walk.NumberEdit
+		uiConvirm  *walk.PushButton
 		mode       int
+
+		refreshTimer *time.Ticker
 	}
 
 	// Image struct
@@ -61,6 +65,7 @@ type (
 )
 
 var (
+	modelItem    *ImageItem
 	_iniImgList  [1000]*ImageItem
 	imgList      = _iniImgList[0:0]
 	currentFrame int
@@ -137,6 +142,7 @@ func readPoseImage(path, ext string) {
 				imageH = bm.Size().Height
 				parseImgBoundary(newImg.img)
 			}
+			modelItem = newImg
 
 		}
 	}
@@ -187,8 +193,13 @@ func readImageList(path, ext string) error {
 
 /////////////End image opration
 
-func (mw *MainWindow) openImage() {
-	folderPath := selfWidget.GetPath(0, 0)
+func (mw *MainWindow) openImage(mode int) {
+	var folderPath string
+	if mode == MODE_COMPOSE {
+		folderPath = selfWidget.GetPath(0, 0)
+	} else {
+		folderPath = selfWidget.GetOpenFileName(0, 0)
+	}
 	f, err := os.Open(folderPath)
 	if err != nil {
 		return
@@ -199,19 +210,29 @@ func (mw *MainWindow) openImage() {
 		return
 	}
 
+	if mw.refreshTimer != nil {
+		mw.refreshTimer.Stop()
+	}
+
 	if fs.IsDir() {
 		readImageList(folderPath, ".png")
 		mw.setImageSize()
+		mw.refreshToolBar(MODE_COMPOSE)
+		mw.initFrame()
 		return
 	}
 	readPoseImage(folderPath, ".png")
 	mw.setImageSize()
+	mw.refreshToolBar(MODE_PLAY)
+	mw.onClickSave()
+
+	mw.initFrame()
 }
 
 func (mw *MainWindow) saveImage() {
-	path := selfWidget.GetSavePath(0,
-	    "(All Images) |*.png|*.jpg",
-	    ".png")
+	path := selfWidget.GetSavePath(0)
+	//"(All Images) |*.png|*.jpg",
+	//".png")
 	mw.composeImg(path)
 }
 
@@ -235,22 +256,76 @@ func (mw *MainWindow) setImageSize() {
 }
 
 func (mw *MainWindow) initFrame() {
-	timer := time.NewTicker(time.Millisecond * 83)
+	mw.refreshTimer = time.NewTicker(time.Millisecond * 83)
 	go func() {
-		for _ = range timer.C {
+		for _ = range mw.refreshTimer.C {
 			// <-timer.C
 			// fmt.Println(t)
 			mw.drawImage()
 		}
 
 	}()
+
+	mw.Invalidate()
+}
+
+func (mw *MainWindow) onClickSave() {
+	if modelItem == nil {
+		return
+	}
+
+	poseCnt := int(mw.uiPoseCnt.Value())
+	if poseCnt <= 0 {
+		poseCnt = 1
+	}
+	frame := 8
+
+	imageW /= frame
+	imageH /= poseCnt
+
+	imgList = _iniImgList[0:0]
+	boundary = image.Rect(0, 0, imageW, imageH)
+	tmpBound := boundary
+	fmt.Printf("image w: %d, h: %d\n", imageW, imageH)
+	// Read all png images
+	for i := 0; i < poseCnt; i++ {
+		for j := 0; j < frame; j++ {
+			deltaX := imageW * j
+			deltaY := imageH * i
+			tmpBound = boundary.Add(image.Point{deltaX, deltaY})
+
+			newImg := new(ImageItem)
+			newImg.fname = ""
+			newImg.img = modelItem.img.SubImage(tmpBound).(ImageExt)
+			fmt.Printf("pose: %v\n", tmpBound)
+			newImg.bm, _ = walk.NewBitmapFromImage(newImg.img)
+
+			imgList = append(imgList, newImg)
+		}
+	}
+}
+
+func (mw *MainWindow) refreshToolBar(mode int) {
+	mw.uiConvirm.SetEnabled(false)
+
+	mw.mode = mode
+	if mw.mode == MODE_INVALID {
+		return
+	}
+
+	if mw.mode == MODE_PLAY {
+		mw.uiConvirm.SetEnabled(true)
+		return
+	}
+	if mw.mode == MODE_COMPOSE {
+	}
 }
 
 func (mw *MainWindow) getPoseInfo() (int, int) {
 	totalFrame := len(imgList)
 	poseCnt := int(mw.uiPoseCnt.Value())
 	if poseCnt <= 0 {
-		return 1, totalFrame
+		poseCnt = 1
 	}
 
 	if poseCnt >= totalFrame {
@@ -297,13 +372,13 @@ func (mw *MainWindow) composeImg(fullname string) {
 	// Modify stride
 
 	/*
-	if rgba {
-		result.(*image.RGBA).Stride = 8
-		println(result.(*image.RGBA).Stride)
-	} else {
-		result.(*image.NRGBA).Stride = 8
-		println(result.(*image.NRGBA).Stride)
-	}
+		if rgba {
+			result.(*image.RGBA).Stride = 8
+			println(result.(*image.RGBA).Stride)
+		} else {
+			result.(*image.NRGBA).Stride = 8
+			println(result.(*image.NRGBA).Stride)
+		}
 	*/
 
 	f, err := os.OpenFile(fullname, os.O_RDWR|os.O_CREATE, os.ModePerm)
@@ -328,9 +403,18 @@ func (mw *MainWindow) initMenu() {
 	openAction := walk.NewAction()
 	// openAction.SetImage(openBmp)
 	openAction.SetText("&Open")
-	openAction.Triggered().Attach(func() { mw.openImage() })
+	openAction.Triggered().Attach(func() { mw.openImage(MODE_COMPOSE) })
 	fileMenu.Actions().Add(openAction)
 	mw.ToolBar().Actions().Add(openAction)
+
+	///
+	// Load
+	loadAction := walk.NewAction()
+	// openAction.SetImage(openBmp)
+	loadAction.SetText("&Load")
+	loadAction.Triggered().Attach(func() { mw.openImage(MODE_PLAY) })
+	fileMenu.Actions().Add(loadAction)
+	mw.ToolBar().Actions().Add(loadAction)
 
 	helpMenu, _ := walk.NewMenu()
 	helpMenuAction, _ := mw.Menu().Actions().AddMenu(helpMenu)
@@ -359,14 +443,13 @@ func (mw *MainWindow) initMenu() {
 }
 
 func (mw *MainWindow) initCanvas() {
-    walk.NewHSpacer(mw)
+	walk.NewHSpacer(mw)
 	iv, _ := selfWidget.NewMyImageView(mw)
 	mw.imageView = iv
-	mw.initFrame()
 }
 func (mw *MainWindow) initOtherBars() {
 	sp, _ := walk.NewSplitter(mw)
-	sp.SetSize(walk.Size{400, TB_H})
+	sp.SetSize(walk.Size{400, 20})
 	sp.SetOrientation(walk.Horizontal)
 
 	walk.NewHSpacer(sp)
@@ -377,19 +460,29 @@ func (mw *MainWindow) initOtherBars() {
 
 	// others
 	mw.uiFrameCnt, _ = walk.NewNumberEdit(sp)
-	mw.uiFrameCnt.SetSize(walk.Size{42, TB_H})
+	//mw.uiFrameCnt.SetSize(walk.Size{42, TB_H})
 	mw.uiFrameCnt.SetRange(1, 100)
 	mw.uiFrameCnt.SetDecimals(0)
+	mw.uiFrameCnt.SetValue(8)
+	mw.uiFrameCnt.SetEnabled(false)
 	mw.uiFrameCnt.SetToolTipText(ttPlayPose)
 
 	// lab, _ := walk.NewLabel(sp)
 	// lab.SetSize(walk.Size{16, 30})
 	// lab.SetText("Pose")
 	mw.uiPoseCnt, _ = walk.NewNumberEdit(sp)
-	mw.uiPoseCnt.SetSize(walk.Size{42, TB_H})
+	//mw.uiPoseCnt.SetSize(walk.Size{42, TB_H})
 	mw.uiPoseCnt.SetRange(1, 100)
+	mw.uiPoseCnt.SetValue(1)
 	mw.uiPoseCnt.SetDecimals(0)
 	mw.uiPoseCnt.SetToolTipText(ttPosCnt)
+
+	mw.uiConvirm, _ = walk.NewPushButton(sp)
+	mw.uiConvirm.SetText("OK")
+	mw.uiConvirm.Clicked().Attach(func() {
+		// Get some fresh data.
+		mw.onClickSave()
+	})
 
 	walk.InitWidget(sp, mw, FREEZEIZE_CLASS,
 		winapi.CCS_NORESIZE,
@@ -410,6 +503,8 @@ func newMainWindow() {
 
 	mw.SetMinMaxSize(walk.Size{800, 600}, walk.Size{})
 	mw.SetSize(walk.Size{800, 600})
+
+	mw.refreshToolBar(MODE_INVALID)
 	mw.Show()
 	mw.Run()
 }
