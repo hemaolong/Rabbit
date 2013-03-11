@@ -8,6 +8,7 @@ import (
 	"image/png"
 	"os"
 	"path/filepath"
+	"reflect"
 	"time"
 
 	"github.com/lxn/go-winapi"
@@ -193,7 +194,7 @@ func readImageList(path, ext string) error {
 
 /////////////End image opration
 
-func (mw *MainWindow) openImage(mode int) {    //
+func (mw *MainWindow) openImage(mode int) { //
 	var folderPath string
 	if mode == MODE_COMPOSE {
 		folderPath = selfWidget.GetPath(mw, "Select the folder")
@@ -240,6 +241,7 @@ func (mw *MainWindow) saveImage() {
 	if len(path) == 0 {
 		return
 	}
+	println(path)
 	mw.composeImg(path)
 }
 
@@ -361,11 +363,15 @@ func (mw *MainWindow) composeImg(fullname string) {
 	switch firstImg.(type) {
 	case *image.RGBA:
 		result = image.NewRGBA(_newBound)
-		//rgba = true
+	case *image.RGBA64:
+		result = image.NewRGBA64(_newBound)
 	case *image.NRGBA:
 		result = image.NewNRGBA(_newBound)
-		//rgba = false
+	case *image.NRGBA64:
+		result = image.NewNRGBA64(_newBound)
 	default:
+		fmt.Println("image type: ", reflect.TypeOf(firstImg))
+		println("Unsupported image type")
 		return
 	}
 
