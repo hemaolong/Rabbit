@@ -193,12 +193,14 @@ func readImageList(path, ext string) error {
 
 /////////////End image opration
 
-func (mw *MainWindow) openImage(mode int) {
+func (mw *MainWindow) openImage(mode int) {    //
 	var folderPath string
 	if mode == MODE_COMPOSE {
-		folderPath = selfWidget.GetPath(0, 0)
+		folderPath = selfWidget.GetPath(mw, "Select the folder")
 	} else {
-		folderPath = selfWidget.GetOpenFileName(0, 0)
+		title := "Select an image"
+		filter := "Image Files (*.png)|*.png"
+		folderPath = selfWidget.GetOpenFileName(mw, title, filter)
 	}
 	f, err := os.Open(folderPath)
 	if err != nil {
@@ -232,12 +234,12 @@ func (mw *MainWindow) openImage(mode int) {
 }
 
 func (mw *MainWindow) saveImage() {
-	path := selfWidget.GetSavePath(0)
+	title := "Save the image"
+	filter := "Image Files (*.png)|*.png"
+	path := selfWidget.GetSaveFileName(mw, title, filter)
 	if len(path) == 0 {
 		return
 	}
-	//"(All Images) |*.png|*.jpg",
-	//".png")
 	mw.composeImg(path)
 }
 

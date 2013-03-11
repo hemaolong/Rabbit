@@ -8,6 +8,8 @@ import (
 	"github.com/lxn/go-winapi"
 	"syscall"
 	"unsafe"
+
+	"github.com/lxn/walk"
 )
 
 type (
@@ -32,44 +34,55 @@ type (
 
 var (
 	libshell uintptr
+
+	prevFilePath string
+
+	preSavePath *uint16
 )
 
 func init() {
 	libshell = winapi.MustLoadLibrary("Shell32.dll")
 }
 
-func GetOpenFileName(parent winapi.HWND, path uintptr) string {
-	ofn := &winapi.OPENFILENAME{}
+func GetOpenFileName(parent walk.RootWidget, title, filter string) string {
+	dlg := &walk.FileDialog{}
 
-	ofn.LStructSize = uint32(unsafe.Sizeof(*ofn))
-	ofn.HwndOwner = parent
+	dlg.FilePath = prevFilePath
+	dlg.Filter = filter
+	dlg.Title = title
 
-	filter := make([]uint16, 124)
-	ofn.LpstrFilter = &filter[0]
-	ofn.NFilterIndex = 1
+	if ok, _ := dlg.ShowOpen(parent); !ok {
+		return ""
+	}
 
-	filePath := make([]uint16, 124)
-	ofn.LpstrFile = &filePath[0]
-	ofn.NMaxFile = uint32(len(filePath))
-
-	//w32.CoInitialize()
-	winapi.GetOpenFileName(ofn)
-
-
-	return syscall.UTF16ToString(filePath[:])
-
+	prevFilePath = dlg.FilePath
+	return prevFilePath
 }
 
-func GetPath(parent winapi.HWND, path uintptr) string {
+func GetSaveFileName(parent walk.RootWidget, title, filter string) string {
+	dlg := &walk.FileDialog{}
+
+	dlg.InitialDirPath = prevFilePath
+	dlg.Filter = filter
+	dlg.Title = title
+
+	if ok, _ := dlg.ShowSave(parent); !ok {
+		return ""
+	}
+
+	prevFilePath = dlg.FilePath
+	return prevFilePath
+}
+
+func GetPath(parent walk.RootWidget, title string) string {
 	var bi BROWSEINFO
-	bi.Owner = parent
+	bi.Owner = 0
 	// bi.Root = path
-	bi.Title = syscall.StringToUTF16Ptr("Select")
+	bi.Title = syscall.StringToUTF16Ptr(title)
 	bi.Flags = 0x10 | 0x40
 
-	// coInitialize := MustGetProcAddress(libuser32, "CoInitialize")
-	// syscall.Syscall(coInitialize, 1, 0, 0, 0)
-	//w32.CoInitialize()
+	bi.Root = (*uint16)(unsafe.Pointer(preSavePath))
+
 	sHBrowseForFolder := winapi.MustGetProcAddress(libshell, "SHBrowseForFolderW")
 	ret, _, _ := syscall.Syscall(sHBrowseForFolder,
 		1, uintptr(unsafe.Pointer(&bi)), 0, 0)
@@ -79,31 +92,8 @@ func GetPath(parent winapi.HWND, path uintptr) string {
 	syscall.Syscall(getPath,
 		2, uintptr(ret), uintptr(unsafe.Pointer(&nameBuf[0])), 0)
 
+	preSavePath = (*uint16)(unsafe.Pointer(ret))
+
 	return syscall.UTF16ToString(nameBuf[:])
 
-}
-
-func GetSavePath(parent winapi.HWND) string {
-    ofn := &winapi.OPENFILENAME{}
-
-	ofn.LStructSize = uint32(unsafe.Sizeof(*ofn))
-	ofn.HwndOwner = parent
-
-	filter := make([]uint16, 124)
-	ofn.LpstrFilter = &filter[0]
-	ofn.NFilterIndex = 1
-
-	filePath := make([]uint16, 124)
-	ofn.LpstrFile = &filePath[0]
-	ofn.NMaxFile = uint32(len(filePath))
-
-	// ofn.LpstrInitialDir = syscall.StringToUTF16Ptr(dlg.InitialDirPath)
-	// ofn.LpstrTitle = syscall.StringToUTF16Ptr(dlg.Title)
-	ofn.Flags = winapi.OFN_FILEMUSTEXIST
-
-	if ret := winapi.GetSaveFileName(ofn); !ret {
-		return ""
-	}
-
-	return syscall.UTF16ToString(filePath)
 }
