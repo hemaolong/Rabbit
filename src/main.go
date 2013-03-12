@@ -510,17 +510,27 @@ func (mw *MainWindow) composeImg(fullname string) {
 	png.Encode(f, result)
 }
 
+func setIcon(ui *walk.Action, fname string) {
+    fpath := "./img/" + fname
+    _, err := os.Stat(fpath)
+    if err != nil {
+        fmt.Println(err)
+        return
+    }
+    img, _ := walk.NewBitmapFromFile(fpath)
+    ui.SetImage(img)
+}
+
 func (mw *MainWindow) initMenu() {
 	fileMenu, _ := walk.NewMenu()
 	fileMenuAction, _ := mw.Menu().Actions().AddMenu(fileMenu)
 	fileMenuAction.SetText("&File")
 
-	//openBmp, _ := walk.NewBitmapFromFile("../img/open.png")
 	imageList, _ := walk.NewImageList(walk.Size{TB_H, TB_H}, 0)
 	mw.ToolBar().SetImageList(imageList)
 
 	openAction := walk.NewAction()
-	// openAction.SetImage(openBmp)
+	setIcon(openAction, "open.png")
 	openAction.SetText("&Open")
 	openAction.Triggered().Attach(func() { go mw.openImage(MODE_COMPOSE) })
 	fileMenu.Actions().Add(openAction)
@@ -529,7 +539,7 @@ func (mw *MainWindow) initMenu() {
 	///
 	// Load
 	loadAction := walk.NewAction()
-	// openAction.SetImage(openBmp)
+	setIcon(loadAction, "load.png")
 	loadAction.SetText("&Load")
 	loadAction.Triggered().Attach(func() { mw.openImage(MODE_PLAY) })
 	fileMenu.Actions().Add(loadAction)
@@ -545,15 +555,17 @@ func (mw *MainWindow) initMenu() {
 		walk.MsgBox(mw, "About", "Image composer",
 			walk.MsgBoxOK|walk.MsgBoxIconInformation)
 	})
-	helpMenu.Actions().Add(aboutAction)
 
 	// Image operations
 	// Save
 	mw.uiComposeAction = walk.NewAction()
+	setIcon(mw.uiComposeAction, "save.png")
 	mw.uiComposeAction.SetText("&Save")
 	mw.uiComposeAction.Triggered().Attach(func() { go mw.saveImage() })
 	fileMenu.Actions().Add(mw.uiComposeAction)
 	mw.ToolBar().Actions().Add(mw.uiComposeAction)
+
+	recover()
 
 	// Exit
 	exitAction := walk.NewAction()
