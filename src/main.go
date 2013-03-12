@@ -73,6 +73,8 @@ const (
 )
 
 var (
+	screenW, screenH int
+
 	modelItem    *ImageItem
 	_iniImgList  [1000]*ImageItem
 	imgList      = _iniImgList[0:0]
@@ -131,8 +133,8 @@ func parseImgBoundary(img image.Image) {
 	}
 }
 
-func readPoseImage(path, ext string) {
-	imgList = _iniImgList[0:0]
+func (mw *MainWindow) readPoseImage(path, ext string) {
+	mw.resetImageList()
 	// Read all png images
 
 	curExt := filepath.Ext(path)
@@ -150,13 +152,32 @@ func readPoseImage(path, ext string) {
 				imageH = bm.Size().Height
 				parseImgBoundary(newImg.img)
 			}
+			if modelItem != nil {
+				modelItem.bm.Dispose()
+			}
 			modelItem = newImg
 
 		}
 	}
 }
 
-func readImageList(path, ext string) error {
+func (mw *MainWindow) resetImageList() {
+	if mw.refreshTimer != nil {
+		mw.refreshTimer.Stop()
+		mw.refreshTimer = nil
+	}
+
+	for i := 0; i < POSE_CNT_MAX; i++ {
+		mw.imageView[i].SetImage(nil)
+	}
+
+	for _, v := range imgList {
+		v.bm.Dispose()
+	}
+	imgList = _iniImgList[0:0]
+}
+
+func (mw *MainWindow) readImageList(path, ext string) error {
 	folder, err := os.Open(path)
 	if err != nil {
 		return err
@@ -167,8 +188,7 @@ func readImageList(path, ext string) error {
 	if err != nil {
 		return err
 	}
-
-	imgList = _iniImgList[0:0]
+	mw.resetImageList()
 	// Read all png images
 
 	for _, v := range fileList {
@@ -223,13 +243,15 @@ func (mw *MainWindow) openImage(mode int) { //
 	boundary = image.Rect(-1, -1, -1, -1)
 
 	if fs.IsDir() {
-		readImageList(folderPath, ".png")
+		mw.SetTitle(folderPath)
+		mw.readImageList(folderPath, ".png")
 		mw.setImageSize()
 		mw.refreshToolBar(MODE_COMPOSE)
 		mw.initFrame()
 		return
 	}
-	readPoseImage(folderPath, ".png")
+	mw.SetTitle(folderPath)
+	mw.readPoseImage(folderPath, ".png")
 	mw.refreshToolBar(MODE_PLAY)
 	mw.initPoseInfo()
 	mw.setImageSize()
@@ -273,12 +295,13 @@ func (mw *MainWindow) drawImage() {
 
 // Calc the image size, draw the image boundary
 func getLineCnt() int {
+	w := screenW - 80
 	switch {
-	case imageW > 800/2:
+	case imageW > w/2:
 		return 1
-	case imageW > 800/3:
+	case imageW > w/3:
 		return 2
-	case imageW > 800/4:
+	case imageW > w/4:
 		return 3
 	default:
 		return 4
@@ -386,7 +409,7 @@ func (mw *MainWindow) initPoseInfo() {
 	imageW = w / frameCount
 	imageH = h / poseCnt
 
-	imgList = _iniImgList[0:0]
+	mw.resetImageList()
 	boundary = image.Rect(0, 0, imageW, imageH)
 	tmpBound := boundary
 	// Read all png images
@@ -511,14 +534,14 @@ func (mw *MainWindow) composeImg(fullname string) {
 }
 
 func setIcon(ui *walk.Action, fname string) {
-    fpath := "./img/" + fname
-    _, err := os.Stat(fpath)
-    if err != nil {
-        fmt.Println(err)
-        return
-    }
-    img, _ := walk.NewBitmapFromFile(fpath)
-    ui.SetImage(img)
+	fpath := "./img/" + fname
+	_, err := os.Stat(fpath)
+	if err != nil {
+		fmt.Println(err)
+		return
+	}
+	img, _ := walk.NewBitmapFromFile(fpath)
+	ui.SetImage(img)
 }
 
 func (mw *MainWindow) initMenu() {
@@ -550,9 +573,10 @@ func (mw *MainWindow) initMenu() {
 	helpMenuAction.SetText("&Help")
 
 	aboutAction := walk.NewAction()
+	helpMenu.Actions().Add(aboutAction)
 	aboutAction.SetText("&About")
 	aboutAction.Triggered().Attach(func() {
-		walk.MsgBox(mw, "About", "Image composer",
+		walk.MsgBox(mw, "About", "Image composer V0.1\nAuthor:heml",
 			walk.MsgBoxOK|walk.MsgBoxIconInformation)
 	})
 
@@ -564,8 +588,6 @@ func (mw *MainWindow) initMenu() {
 	mw.uiComposeAction.Triggered().Attach(func() { go mw.saveImage() })
 	fileMenu.Actions().Add(mw.uiComposeAction)
 	mw.ToolBar().Actions().Add(mw.uiComposeAction)
-
-	recover()
 
 	// Exit
 	exitAction := walk.NewAction()
@@ -644,6 +666,9 @@ func newMainWindow() {
 func init() {
 	walk.MustRegisterWindowClass(FREEZEIZE_CLASS)
 	runtime.GOMAXPROCS(2)
+
+	screenW = int(winapi.GetSystemMetrics(winapi.SM_CXSCREEN))
+	screenH = int(winapi.GetSystemMetrics(winapi.SM_CYSCREEN))
 }
 
 func main() {
