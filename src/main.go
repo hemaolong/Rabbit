@@ -9,6 +9,8 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"runtime"
+	"strings"
 	"time"
 
 	"github.com/lxn/go-winapi"
@@ -18,41 +20,28 @@ import (
 	selfWidget "mywidget"
 )
 
-type ImageExt interface {
-	ColorModel() color.Model
-	Bounds() image.Rectangle
-	At(x, y int) color.Color
-
-	// (x, y, stride int)
-
-	SubImage(image.Rectangle) image.Image
-}
-
-const (
-	TB_H int = 16 // Tool bar size
-	OB_H int = 12 // Other bar size
-
-	FREEZEIZE_CLASS string = "FREEZEIZE_CLASS0"
-
-	ttPosCnt   string = "动作个数"
-	ttPlayPose string = "播放动作"
-
-	// MODE
-	MODE_COMPOSE int = 0
-	MODE_PLAY    int = 1
-	MODE_INVALID int = 3
-)
-
 type (
+	ImageExt interface {
+		ColorModel() color.Model
+		Bounds() image.Rectangle
+		At(x, y int) color.Color
+
+		// (x, y, stride int)
+
+		SubImage(image.Rectangle) image.Image
+	}
 	MainWindow struct {
 		*walk.MainWindow
-		imageView *selfWidget.MyImageView
+		viewGrid  *walk.GridLayout
+		imageView [POSE_CNT_MAX]*selfWidget.MyImageView
 
 		// Other ui
 		uiFrameCnt *walk.NumberEdit
 		uiPoseCnt  *walk.NumberEdit
-		uiConvirm  *walk.PushButton
-		mode       int
+		// uiPlayPose      *walk.NumberEdit
+		uiConvirm       *walk.PushButton
+		uiComposeAction *walk.Action
+		mode            int
 
 		refreshTimer *time.Ticker
 	}
@@ -63,6 +52,24 @@ type (
 		bm    *walk.Bitmap
 		img   ImageExt
 	}
+)
+
+const (
+	GRID_CNT     = 10
+	TB_H     int = 16 // Tool bar size
+	OB_H     int = 12 // Other bar size
+
+	POSE_CNT_MAX int = 8
+
+	FREEZEIZE_CLASS string = "FREEZEIZE_CLASS0"
+
+	ttPosCnt   string = "动作个数"
+	ttPlayPose string = "播放动作"
+
+	// MODE
+	MODE_COMPOSE int = 0
+	MODE_PLAY    int = 1
+	MODE_INVALID int = 3
 )
 
 var (
@@ -213,10 +220,6 @@ func (mw *MainWindow) openImage(mode int) { //
 		return
 	}
 
-	if mw.refreshTimer != nil {
-		mw.refreshTimer.Stop()
-	}
-
 	boundary = image.Rect(-1, -1, -1, -1)
 
 	if fs.IsDir() {
@@ -227,9 +230,10 @@ func (mw *MainWindow) openImage(mode int) { //
 		return
 	}
 	readPoseImage(folderPath, ".png")
-	mw.setImageSize()
 	mw.refreshToolBar(MODE_PLAY)
-	mw.onClickSave()
+	mw.initPoseInfo()
+	mw.setImageSize()
+	// mw.onUiSetFrameCnt()
 
 	mw.initFrame()
 }
@@ -242,6 +246,9 @@ func (mw *MainWindow) saveImage() {
 		return
 	}
 	println(path)
+	if !strings.HasSuffix(path, ".png") {
+		path += ".png"
+	}
 	mw.composeImg(path)
 }
 
@@ -251,21 +258,67 @@ func (mw *MainWindow) drawImage() {
 		return
 	}
 
-	f := currentFrame % l
+	poseCnt := mw.getPoseCnt()
+
+	f := currentFrame % frameCount
 	currentFrame++
-	mw.imageView.SetImage(imgList[f].bm)
+
+	for i := 0; i < poseCnt; i++ {
+		curFrame := f + frameCount*i
+		if curFrame < len(imgList) {
+			mw.imageView[i].SetImage(imgList[curFrame].bm)
+		}
+	}
 }
 
 // Calc the image size, draw the image boundary
+func getLineCnt() int {
+	switch {
+	case imageW > 800/2:
+		return 1
+	case imageW > 800/3:
+		return 2
+	case imageW > 800/4:
+		return 3
+	default:
+		return 4
+	}
+	return 1
+}
 func (mw *MainWindow) setImageSize() {
-	mw.imageView.SetSize(walk.Size{imageW, imageH})
+	lc := getLineCnt()
+	gridW := 800 / GRID_CNT
+	gridH := 600 / GRID_CNT
+
+	w := imageW/gridW + 1
+	h := imageH/gridH + 1
+
+	i := 0
+	for ; i < mw.getPoseCnt(); i++ {
+		mw.imageView[i].SetSize(walk.Size{imageW, imageH})
+
+		mw.imageView[i].SetBoundary(boundary.Min.X, boundary.Min.Y,
+			boundary.Dx(), boundary.Dy())
+
+		mw.imageView[i].SetVisible(true)
+		x := (i % lc) * w
+		y := (i / lc) * h
+		mw.viewGrid.SetRange(mw.imageView[i], walk.Rectangle{x, y, w, h})
+	}
+
+	for ; i < POSE_CNT_MAX; i++ {
+		mw.imageView[i].SetVisible(false)
+		mw.imageView[i].Invalidate()
+	}
 
 	fmt.Printf("Boundary %v\n", boundary)
-	mw.imageView.SetBoundary(boundary.Min.X, boundary.Min.Y,
-		boundary.Dx(), boundary.Dy())
 }
 
 func (mw *MainWindow) initFrame() {
+	mw.uiPoseCnt.SetValue(float64(mw.getPoseCnt()))
+	if mw.refreshTimer != nil {
+		return
+	}
 	mw.refreshTimer = time.NewTicker(time.Millisecond * 83)
 	go func() {
 		for _ = range mw.refreshTimer.C {
@@ -273,33 +326,72 @@ func (mw *MainWindow) initFrame() {
 		}
 
 	}()
-
-	mw.Invalidate()
 }
 
-func (mw *MainWindow) onClickSave() {
+func (mw *MainWindow) getPoseCnt() int {
+	l := len(imgList)
+	r := l / frameCount
+	if r == 0 {
+		return 1
+	}
+	if r > POSE_CNT_MAX {
+		return POSE_CNT_MAX
+	}
+	return r
+}
+
+func (mw *MainWindow) initPoseInfo() {
 	if modelItem == nil {
 		return
 	}
 
-	imageW = modelItem.img.Bounds().Dx()
-	imageH = modelItem.img.Bounds().Dy()
-
-	poseCnt := int(mw.uiPoseCnt.Value())
-	if poseCnt <= 0 {
-		poseCnt = 1
+	model := modelItem.img
+	if model == nil {
+		return
 	}
-	frame := 8
+	// Get the pose count
+	poseCnt := 1
+	x := model.Bounds().Min.X
+	y := model.Bounds().Min.Y
+	w := model.Bounds().Dx()
+	h := model.Bounds().Dy()
+	for i := 2; i < POSE_CNT_MAX; i++ {
+		sh := h / i
+		for j := 1; j < i; j++ {
+			beginY := sh * j
+			// Erase the boundary by 1 pix to handel the neighbor pix
+			for z := 1; z < w-1; z++ {
+				_, _, _, a := model.At(x+z, y+beginY).RGBA()
+				if a != 0 {
+					_, _, _, la := model.At(x+z-1, y+beginY).RGBA()
+					_, _, _, ra := model.At(x+z+1, y+beginY).RGBA()
+					_, _, _, ta := model.At(x+z, y+beginY-1).RGBA()
+					_, _, _, da := model.At(x+z, y+beginY+1).RGBA()
+					if la != 0 && ra != 0 && ta != 0 && da != 0 {
+						fmt.Println("Pose alpha:", x+z, y+beginY, a)
+						goto nextPose
+					}
+				}
+			}
+		}
+		poseCnt = i
+		break
 
-	imageW /= frame
-	imageH /= poseCnt
+	nextPose:
+	}
+
+	fmt.Println("Pose count: ", poseCnt)
+
+	// Init the pose list
+	imageW = w / frameCount
+	imageH = h / poseCnt
 
 	imgList = _iniImgList[0:0]
 	boundary = image.Rect(0, 0, imageW, imageH)
 	tmpBound := boundary
 	// Read all png images
 	for i := 0; i < poseCnt; i++ {
-		for j := 0; j < frame; j++ {
+		for j := 0; j < frameCount; j++ {
 			deltaX := imageW * j
 			deltaY := imageH * i
 			tmpBound = boundary.Add(image.Point{deltaX, deltaY})
@@ -312,11 +404,27 @@ func (mw *MainWindow) onClickSave() {
 			imgList = append(imgList, newImg)
 		}
 	}
-	mw.setImageSize()
+
 }
+
+/*
+func (mw *MainWindow) onUiSetFrameCnt() {
+	if modelItem == nil {
+		return
+	}
+
+	// imageW = modelItem.img.Bounds().Dx()
+	// imageH = modelItem.img.Bounds().Dy()
+
+	// poseCnt := mw.getPoseCnt()
+	playPose = int(mw.uiPlayPose.Value())
+	mw.setImageSize()
+}*/
 
 func (mw *MainWindow) refreshToolBar(mode int) {
 	mw.uiConvirm.SetEnabled(false)
+	mw.uiComposeAction.SetEnabled(false)
+	mw.uiPoseCnt.SetEnabled(false)
 
 	mw.mode = mode
 	if mw.mode == MODE_INVALID {
@@ -324,19 +432,16 @@ func (mw *MainWindow) refreshToolBar(mode int) {
 	}
 
 	if mw.mode == MODE_PLAY {
-		mw.uiConvirm.SetEnabled(true)
 		return
 	}
 	if mw.mode == MODE_COMPOSE {
+		mw.uiComposeAction.SetEnabled(true)
 	}
 }
 
 func (mw *MainWindow) getPoseInfo() (int, int) {
 	totalFrame := len(imgList)
-	poseCnt := int(mw.uiPoseCnt.Value())
-	if poseCnt <= 0 {
-		poseCnt = 1
-	}
+	poseCnt := mw.getPoseCnt()
 
 	if poseCnt >= totalFrame {
 		return 1, totalFrame
@@ -417,7 +522,7 @@ func (mw *MainWindow) initMenu() {
 	openAction := walk.NewAction()
 	// openAction.SetImage(openBmp)
 	openAction.SetText("&Open")
-	openAction.Triggered().Attach(func() { mw.openImage(MODE_COMPOSE) })
+	openAction.Triggered().Attach(func() { go mw.openImage(MODE_COMPOSE) })
 	fileMenu.Actions().Add(openAction)
 	mw.ToolBar().Actions().Add(openAction)
 
@@ -437,17 +542,18 @@ func (mw *MainWindow) initMenu() {
 	aboutAction := walk.NewAction()
 	aboutAction.SetText("&About")
 	aboutAction.Triggered().Attach(func() {
-		walk.MsgBox(mw, "About", "Image composer", walk.MsgBoxOK|walk.MsgBoxIconInformation)
+		walk.MsgBox(mw, "About", "Image composer",
+			walk.MsgBoxOK|walk.MsgBoxIconInformation)
 	})
 	helpMenu.Actions().Add(aboutAction)
 
 	// Image operations
 	// Save
-	composeAction := walk.NewAction()
-	composeAction.SetText("&Save")
-	composeAction.Triggered().Attach(func() { mw.saveImage() })
-	fileMenu.Actions().Add(composeAction)
-	mw.ToolBar().Actions().Add(composeAction)
+	mw.uiComposeAction = walk.NewAction()
+	mw.uiComposeAction.SetText("&Save")
+	mw.uiComposeAction.Triggered().Attach(func() { go mw.saveImage() })
+	fileMenu.Actions().Add(mw.uiComposeAction)
+	mw.ToolBar().Actions().Add(mw.uiComposeAction)
 
 	// Exit
 	exitAction := walk.NewAction()
@@ -457,16 +563,14 @@ func (mw *MainWindow) initMenu() {
 }
 
 func (mw *MainWindow) initCanvas() {
-	walk.NewHSpacer(mw)
-	iv, _ := selfWidget.NewMyImageView(mw)
-	mw.imageView = iv
+	for i := 0; i < POSE_CNT_MAX; i++ {
+		iv, _ := selfWidget.NewMyImageView(mw)
+		mw.imageView[i] = iv
+	}
 }
 func (mw *MainWindow) initOtherBars() {
 	sp, _ := walk.NewSplitter(mw)
 	sp.SetSize(walk.Size{400, 20})
-	sp.SetOrientation(walk.Horizontal)
-
-	walk.NewHSpacer(sp)
 
 	lab, _ := walk.NewLabel(sp)
 	lab.SetSize(walk.Size{16, 30})
@@ -481,9 +585,6 @@ func (mw *MainWindow) initOtherBars() {
 	mw.uiFrameCnt.SetEnabled(false)
 	mw.uiFrameCnt.SetToolTipText(ttPlayPose)
 
-	// lab, _ := walk.NewLabel(sp)
-	// lab.SetSize(walk.Size{16, 30})
-	// lab.SetText("Pose")
 	mw.uiPoseCnt, _ = walk.NewNumberEdit(sp)
 	//mw.uiPoseCnt.SetSize(walk.Size{42, TB_H})
 	mw.uiPoseCnt.SetRange(1, 100)
@@ -495,7 +596,7 @@ func (mw *MainWindow) initOtherBars() {
 	mw.uiConvirm.SetText("OK")
 	mw.uiConvirm.Clicked().Attach(func() {
 		// Get some fresh data.
-		mw.onClickSave()
+		// mw.onUiSetFrameCnt()
 	})
 
 	walk.InitWidget(sp, mw, FREEZEIZE_CLASS,
@@ -508,7 +609,12 @@ func newMainWindow() {
 	mainWnd, _ := walk.NewMainWindow()
 
 	mw := &MainWindow{MainWindow: mainWnd}
-	mw.SetLayout(walk.NewVBoxLayout())
+	mw.viewGrid = walk.NewGridLayout()
+	mw.SetLayout(mw.viewGrid)
+	mw.viewGrid.SetRowStretchFactor(GRID_CNT, 2)
+	mw.viewGrid.SetColumnStretchFactor(GRID_CNT, 2)
+	mw.viewGrid.SetMargins(walk.Margins{6, 28, 2, 6})
+
 	mw.SetTitle("Image composer")
 
 	mw.initMenu()
@@ -525,6 +631,7 @@ func newMainWindow() {
 
 func init() {
 	walk.MustRegisterWindowClass(FREEZEIZE_CLASS)
+	runtime.GOMAXPROCS(2)
 }
 
 func main() {
