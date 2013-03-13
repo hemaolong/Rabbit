@@ -198,17 +198,16 @@ func (mw *MainWindow) readImageList(path, ext string) error {
 			if curExt == ext {
 				imgList = append(imgList)
 				fullname := path + "/" + fname
-				if bm, err := walk.NewBitmapFromFile(fullname); err == nil {
+				if _img, err := readImge(fullname); err == nil {
 					newImg := new(ImageItem)
 					newImg.fname = fullname
-					newImg.bm = bm
-					_img, err := readImge(fullname)
+					newImg.bm, _ = walk.NewBitmapFromImage(_img)
 					if err == nil {
 						newImg.img = _img.(ImageExt)
 						imgList = append(imgList, newImg)
 
-						imageW = bm.Size().Width
-						imageH = bm.Size().Height
+						imageW = newImg.bm.Size().Width
+						imageH = newImg.bm.Size().Height
 						parseImgBoundary(newImg.img)
 					}
 				}
@@ -481,12 +480,13 @@ func (mw *MainWindow) composeImg(fullname string) {
 		return
 	}
 
-	var result draw.Image
 	sw := boundary.Dx()
 	sh := boundary.Dy()
 
 	//var rgba bool
 	_newBound := image.Rect(0, 0, sw*frame, sh*poseCnt)
+	// No need to check the source image type.
+	var result draw.Image
 	firstImg := imgList[0].img
 	switch firstImg.(type) {
 	case *image.RGBA:
@@ -502,6 +502,9 @@ func (mw *MainWindow) composeImg(fullname string) {
 		println("Unsupported image type")
 		return
 	}
+	// Compress to RGBA32, Stride
+	// result := image.NewRGBA(_newBound)
+	// result.Stride = result.Bounds().Dx()
 
 	singleBound := image.Rect(0, 0, sw, sh)
 	for i, _img := range imgList {
@@ -512,16 +515,7 @@ func (mw *MainWindow) composeImg(fullname string) {
 		draw.Draw(result, drawBound, _subImg, _subImg.Bounds().Min, draw.Src)
 	}
 	// Modify stride
-
-	/*
-		if rgba {
-			result.(*image.RGBA).Stride = 8
-			println(result.(*image.RGBA).Stride)
-		} else {
-			result.(*image.NRGBA).Stride = 8
-			println(result.(*image.NRGBA).Stride)
-		}
-	*/
+	// fmt.Println("Stride ", result.Stride)
 
 	f, err := os.OpenFile(fullname, os.O_RDWR|os.O_CREATE, os.ModePerm)
 	if err != nil {

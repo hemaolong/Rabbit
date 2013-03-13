@@ -81,7 +81,7 @@ func GetPath(parent walk.RootWidget, title string) string {
 	bi.Title = syscall.StringToUTF16Ptr(title)
 	bi.Flags = 0x10 | 0x40
 
-	bi.Root = (*uint16)(unsafe.Pointer(preSavePath))
+	// bi.Root = (*uint16)(unsafe.Pointer(preSavePath))
 
 	sHBrowseForFolder := winapi.MustGetProcAddress(libshell, "SHBrowseForFolderW")
 	ret, _, _ := syscall.Syscall(sHBrowseForFolder,
