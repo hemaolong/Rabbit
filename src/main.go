@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"fmt"
 	"image"
 	"image/color"
@@ -38,6 +39,8 @@ type (
 		// Other ui
 		uiFrameCnt *walk.NumberEdit
 		uiPoseCnt  *walk.NumberEdit
+
+		uiAddBoundY *walk.NumberEdit
 		// uiPlayPose      *walk.NumberEdit
 		uiConvirm       *walk.PushButton
 		uiComposeAction *walk.Action
@@ -82,7 +85,8 @@ var (
 	imageW       int
 	imageH       int
 
-	boundary image.Rectangle = image.Rect(-1, -1, -1, -1)
+	boundary  image.Rectangle = image.Rect(-1, -1, -1, -1)
+	yBoundAdd int             = 0
 
 	// ui
 	frameCount int = 8 // The frame count of a pose
@@ -198,17 +202,16 @@ func (mw *MainWindow) readImageList(path, ext string) error {
 			if curExt == ext {
 				imgList = append(imgList)
 				fullname := path + "/" + fname
-				if bm, err := walk.NewBitmapFromFile(fullname); err == nil {
+				if _img, err := readImge(fullname); err == nil {
 					newImg := new(ImageItem)
 					newImg.fname = fullname
-					newImg.bm = bm
-					_img, err := readImge(fullname)
+					newImg.bm, _ = walk.NewBitmapFromImage(_img)
 					if err == nil {
 						newImg.img = _img.(ImageExt)
 						imgList = append(imgList, newImg)
 
-						imageW = bm.Size().Width
-						imageH = bm.Size().Height
+						imageW = newImg.bm.Size().Width
+						imageH = newImg.bm.Size().Height
 						parseImgBoundary(newImg.img)
 					}
 				}
@@ -320,8 +323,9 @@ func (mw *MainWindow) setImageSize() {
 	for ; i < mw.getPoseCnt(); i++ {
 		mw.imageView[i].SetSize(walk.Size{imageW, imageH})
 
-		mw.imageView[i].SetBoundary(boundary.Min.X, boundary.Min.Y,
-			boundary.Dx(), boundary.Dy())
+		mw.imageView[i].SetBoundary(boundary.Min.X,
+			boundary.Min.Y,
+			boundary.Dx(), boundary.Dy() + yBoundAdd)
 
 		mw.imageView[i].SetVisible(true)
 		x := (i % lc) * w
@@ -481,12 +485,13 @@ func (mw *MainWindow) composeImg(fullname string) {
 		return
 	}
 
-	var result draw.Image
 	sw := boundary.Dx()
-	sh := boundary.Dy()
+	sh := boundary.Dy() + yBoundAdd
 
 	//var rgba bool
 	_newBound := image.Rect(0, 0, sw*frame, sh*poseCnt)
+	// No need to check the source image type.
+	var result draw.Image
 	firstImg := imgList[0].img
 	switch firstImg.(type) {
 	case *image.RGBA:
@@ -502,6 +507,9 @@ func (mw *MainWindow) composeImg(fullname string) {
 		println("Unsupported image type")
 		return
 	}
+	// Compress to RGBA32, Stride
+	// result := image.NewRGBA(_newBound)
+	// result.Stride = result.Bounds().Dx()
 
 	singleBound := image.Rect(0, 0, sw, sh)
 	for i, _img := range imgList {
@@ -512,16 +520,7 @@ func (mw *MainWindow) composeImg(fullname string) {
 		draw.Draw(result, drawBound, _subImg, _subImg.Bounds().Min, draw.Src)
 	}
 	// Modify stride
-
-	/*
-		if rgba {
-			result.(*image.RGBA).Stride = 8
-			println(result.(*image.RGBA).Stride)
-		} else {
-			result.(*image.NRGBA).Stride = 8
-			println(result.(*image.NRGBA).Stride)
-		}
-	*/
+	// fmt.Println("Stride ", result.Stride)
 
 	f, err := os.OpenFile(fullname, os.O_RDWR|os.O_CREATE, os.ModePerm)
 	if err != nil {
@@ -529,8 +528,11 @@ func (mw *MainWindow) composeImg(fullname string) {
 		return
 	}
 	defer f.Close()
+
 	f.Truncate(0)
-	png.Encode(f, result)
+	// buf := bufio.NewWriterSize(f, 1024 * 1000)
+	buf := bufio.NewWriter(f)
+	png.Encode(buf, result)
 }
 
 func setIcon(ui *walk.Action, fname string) {
@@ -585,7 +587,7 @@ func (mw *MainWindow) initMenu() {
 	mw.uiComposeAction = walk.NewAction()
 	setIcon(mw.uiComposeAction, "save.png")
 	mw.uiComposeAction.SetText("&Save")
-	mw.uiComposeAction.Triggered().Attach(func() { go mw.saveImage() })
+	mw.uiComposeAction.Triggered().Attach(func() { mw.saveImage() })
 	fileMenu.Actions().Add(mw.uiComposeAction)
 	mw.ToolBar().Actions().Add(mw.uiComposeAction)
 
@@ -625,6 +627,22 @@ func (mw *MainWindow) initOtherBars() {
 	mw.uiPoseCnt.SetValue(1)
 	mw.uiPoseCnt.SetDecimals(0)
 	mw.uiPoseCnt.SetToolTipText(ttPosCnt)
+
+	mw.uiAddBoundY, _ = walk.NewNumberEdit(sp)
+	mw.uiAddBoundY.SetRange(1, 1000)
+	mw.uiAddBoundY.SetValue(0)
+	mw.uiAddBoundY.SetDecimals(0)
+	mw.uiAddBoundY.ValueChanged().Attach(func() {
+		yBoundAdd = int(mw.uiAddBoundY.Value())
+		if yBoundAdd < 0 {
+			yBoundAdd = 0
+		}
+		if yBoundAdd > (imageH - boundary.Max.Y) {
+			yBoundAdd = imageH - boundary.Max.Y
+		}
+		mw.uiAddBoundY.SetValue(float64(yBoundAdd))
+		mw.setImageSize()
+	})
 
 	mw.uiConvirm, _ = walk.NewPushButton(sp)
 	mw.uiConvirm.SetText("OK")
