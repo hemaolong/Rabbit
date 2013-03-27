@@ -89,7 +89,7 @@ var (
 	yBoundAdd int             = 0
 
 	// ui
-	frameCount int = 8 // The frame count of a pose
+	// frameCount int = 8 // The frame count of a pose
 
 )
 
@@ -285,11 +285,11 @@ func (mw *MainWindow) drawImage() {
 
 	poseCnt := mw.getPoseCnt()
 
-	f := currentFrame % frameCount
+	f := currentFrame % int(mw.uiFrameCnt.Value())
 	currentFrame++
 
 	for i := 0; i < poseCnt; i++ {
-		curFrame := f + frameCount*i
+		curFrame := f + int(mw.uiFrameCnt.Value())*i
 		if curFrame < len(imgList) {
 			mw.imageView[i].SetImage(imgList[curFrame].bm)
 		}
@@ -325,7 +325,7 @@ func (mw *MainWindow) setImageSize() {
 
 		mw.imageView[i].SetBoundary(boundary.Min.X,
 			boundary.Min.Y,
-			boundary.Dx(), boundary.Dy() + yBoundAdd)
+			boundary.Dx(), boundary.Dy()+yBoundAdd)
 
 		mw.imageView[i].SetVisible(true)
 		x := (i % lc) * w
@@ -357,7 +357,7 @@ func (mw *MainWindow) initFrame() {
 
 func (mw *MainWindow) getPoseCnt() int {
 	l := len(imgList)
-	r := l / frameCount
+	r := l / int(mw.uiFrameCnt.Value())
 	if r == 0 {
 		return 1
 	}
@@ -410,7 +410,7 @@ func (mw *MainWindow) initPoseInfo() {
 	fmt.Println("Pose count: ", poseCnt)
 
 	// Init the pose list
-	imageW = w / frameCount
+	imageW = w / int(mw.uiFrameCnt.Value())
 	imageH = h / poseCnt
 
 	mw.resetImageList()
@@ -418,7 +418,7 @@ func (mw *MainWindow) initPoseInfo() {
 	tmpBound := boundary
 	// Read all png images
 	for i := 0; i < poseCnt; i++ {
-		for j := 0; j < frameCount; j++ {
+		for j := 0; j < int(mw.uiFrameCnt.Value()); j++ {
 			deltaX := imageW * j
 			deltaY := imageH * i
 			tmpBound = boundary.Add(image.Point{deltaX, deltaY})
@@ -454,6 +454,7 @@ func (mw *MainWindow) refreshToolBar(mode int) {
 	mw.uiPoseCnt.SetEnabled(false)
 
 	mw.mode = mode
+	mw.uiFrameCnt.SetEnabled(false)
 	if mw.mode == MODE_INVALID {
 		return
 	}
@@ -462,6 +463,7 @@ func (mw *MainWindow) refreshToolBar(mode int) {
 		return
 	}
 	if mw.mode == MODE_COMPOSE {
+		mw.uiFrameCnt.SetEnabled(true)
 		mw.uiComposeAction.SetEnabled(true)
 	}
 }
@@ -634,8 +636,8 @@ func (mw *MainWindow) initOtherBars() {
 	mw.uiAddBoundY.SetDecimals(0)
 	mw.uiAddBoundY.ValueChanged().Attach(func() {
 		yBoundAdd = int(mw.uiAddBoundY.Value())
-		if yBoundAdd < 0 {
-			yBoundAdd = 0
+		if yBoundAdd < -imageH {
+			yBoundAdd = -imageH
 		}
 		if yBoundAdd > (imageH - boundary.Max.Y) {
 			yBoundAdd = imageH - boundary.Max.Y
