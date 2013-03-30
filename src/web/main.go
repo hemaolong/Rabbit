@@ -15,10 +15,31 @@ type (
 		body  []byte
 	}
 
-	loginController struct{
+	loginController struct {
+	}
 
+	User struct {
+		UserName string
+	}
+
+	adminController struct {
 	}
 )
+
+// Login Controller
+func (this *loginController) IndexAction(w http.ResponseWriter, r *http.Request) {
+	if t, err := template.ParseFiles("template/html/login/index.html"); err == nil {
+		t.Execute(w, nil)
+	}
+}
+
+func (this *adminController) IndexAction(w http.ResponseWriter,
+	r *http.Request, user string) {
+	t, err := template.ParseFiles("template/html/admin/index.html")
+	if err != nil {
+		t.Execute(w, &User{user})
+	}
+}
 
 func (p *page) save() error {
 	fname := p.title + ".txt"
@@ -62,17 +83,44 @@ func loginHandler(w http.ResponseWriter, r *http.Request) {
 
 	login := &loginController{}
 	controller := reflect.ValueOf(login)
-	method := controller.ValueOf(action)
+	method := controller.MethodByName(action)
 	if !method.IsValid() {
 		method = controller.MethodByName(strings.Title("index") + "Action")
 	}
 	requestValue := reflect.ValueOf(r)
-	responseValue = reflect.ValueOf(w)
+	responseValue := reflect.ValueOf(w)
 	method.Call([]reflect.Value{responseValue, requestValue})
+}
+
+func adminHandler(w http.ResponseWriter, r *http.Request) {
+	cookie, err := r.Cookie("admin_name")
+	if err != nil && cookie.Value == "" {
+		http.Redirect(w, r, "/login/index", http.StatusNotFound)
+
+		pathInfo := strings.Trim(r.URL.Path, "/")
+		parts := strings.Split(pathInfo, "/")
+
+		action := ""
+		if len(parts) > 1 {
+			action = strings.Title(parts[1]) + "Action"
+		}
+
+		admin := &adminController{}
+		controller := reflect.ValueOf(admin)
+		method := controller.MethodByName(action)
+		if !method.IsValid() {
+			method = controller.MethodByName(strings.Title("index") + "Action")
+		}
+		requestValue := reflect.ValueOf(r)
+		responseValue := reflect.ValueOf(w)
+		userValue := reflect.ValueOf(cookie.Value)
+		method.Call([]reflect.Value{responseValue, requestValue, userValue})
+
+	}
 }
 func main() {
 	http.Handle("/css/", http.FileServer(http.Dir("template")))
-	http.Handle("/js/", httpFileServer(http.Dir("template")))
+	http.Handle("/js/", http.FileServer(http.Dir("template")))
 
 	http.HandleFunc("/admin/", adminHandler)
 	http.HandleFunc("/login/", loginHandler)
